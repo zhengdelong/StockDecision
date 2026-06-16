@@ -95,12 +95,36 @@ Python writes only raw tables:
 - `raw_industry_daily_stats`
 - `data_ingestion_logs`
 
+Task 3 must encode these operating rules, not just table creation:
+
+- Full bootstrap scope:
+  - stock master snapshot: current full market
+  - daily bars: target universe last 8 years
+  - market indices: HS300 / CSI500 / ChiNext last 10 years
+  - financial snapshots: last 12 report periods
+  - industry daily stats: last 3 years
+- Incremental cadence:
+  - 15:30-16:30: stocks, daily bars, indices, industries
+  - 18:00-21:00: financial snapshots and failed-job retries
+  - 21:00-22:00: raw-import -> indicators -> scores -> signals
+- Backtest readiness:
+  - minimum 5 full years daily bars
+  - recommended 6-8 years
+  - first 120 trading days are warm-up only
+- AKShare constraint assumption:
+  - no published universal request quota
+  - collector must use conservative throttling, retry, and circuit-break rules
+  - incomplete-day data blocks buy-signal generation
+
 Steps:
 
 - [ ] Implement collector MySQL writer using SQLAlchemy + PyMySQL.
 - [ ] Store AKShare payloads after field normalization, but before applying trading rules.
-- [ ] Record source, interface, trade date, success count, failure count, missing-field count, and exception message.
+- [ ] Record source, interface, symbol, trade date or report date, batch id, fetched time, success count, failure count, missing-field count, retry count, payload hash, and exception message.
+- [ ] Add throttling policy by interface type: full-market snapshots low-frequency, per-symbol daily bars serial or small-batch, financial interfaces serial with slower delay.
+- [ ] Add exponential backoff and per-interface circuit-break rules for timeout spikes and upstream throttling.
 - [ ] If key daily data is incomplete, mark the ingestion log as incomplete and block buy-plan generation for that date.
+- [ ] Add a completeness policy: if daily bar coverage is below threshold or market indices are missing, that trade date is ineligible for signals and backtests.
 
 ## Task 4: Domain Model
 
@@ -221,6 +245,7 @@ Steps:
 - Docker Compose uses MySQL 8.4 with `utf8mb4`.
 - `.env.example` uses MySQL connection variables.
 - Collector uses SQLAlchemy + PyMySQL and writes raw tables only.
+- Collector plan explicitly defines bootstrap range, incremental cadence, AKShare throttling assumptions, retry rules, and incomplete-day blocking.
 - Infrastructure uses Pomelo EF Core MySQL provider.
 - Strategy behavior remains traceable to `docs/stock-decision-system/`.
 - `dotnet test StockDecision.sln` passes.
