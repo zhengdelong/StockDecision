@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_decision}
+      MYSQL_USER: ${MYSQL_USER:-stock_decision}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_decision_dev}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-stock_decision_root_dev}
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  api:
+    build:
+      context: .
+      dockerfile: src/StockDecision.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__StockDecision: ${ConnectionStrings__StockDecision:-Server=mysql;Port=3306;Database=stock_decision;User=stock_decision;Password=stock_decision_dev;CharSet=utf8mb4;}
+    ports:
+      - "5080:8080"
+    depends_on:
+      - mysql
+
+  worker:
+    build:
+      context: .
+      dockerfile: src/StockDecision.Worker/Dockerfile
+    environment:
+      ConnectionStrings__StockDecision: ${ConnectionStrings__StockDecision:-Server=mysql;Port=3306;Database=stock_decision;User=stock_decision;Password=stock_decision_dev;CharSet=utf8mb4;}
+    depends_on:
+      - mysql
+
+  collector:
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_decision}
+      MYSQL_USER: ${MYSQL_USER:-stock_decision}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_decision_dev}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+    depends_on:
+      - mysql
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5080}
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  mysql_data:

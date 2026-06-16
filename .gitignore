@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+.vscode/
+node_modules/
+dist/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.user
+*.suo
