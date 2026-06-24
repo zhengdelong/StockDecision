@@ -2,13 +2,20 @@ namespace StockDecision.Application.SystemSummary;
 
 public sealed class GetSystemSummaryUseCase
 {
+    private readonly SystemSummaryOptions _options;
+
+    public GetSystemSummaryUseCase(SystemSummaryOptions? options = null)
+    {
+        _options = options ?? new SystemSummaryOptions();
+    }
+
     public SystemSummaryResponse Execute()
     {
         return new SystemSummaryResponse(
-            Name: "A-share Stock Decision System",
-            Capital: 20000m,
-            Mode: "End-of-day decision support",
-            StrategyVersion: "a-share-20k-v1",
+            Name: _options.Name,
+            Capital: _options.Capital,
+            Mode: _options.Mode,
+            StrategyVersion: _options.StrategyVersion,
             Documents:
             [
                 "docs/stock-decision-system/00-overview.md",

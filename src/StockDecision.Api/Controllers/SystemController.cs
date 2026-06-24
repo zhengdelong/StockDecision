@@ -13,7 +13,7 @@ public sealed class SystemController(GetSystemSummaryUseCase getSystemSummaryUse
         return Ok(new
         {
             service = "StockDecision.Api",
-            status = "ok",
+            status = "正常",
             strategy = "a-share-20k-v1"
         });
     }

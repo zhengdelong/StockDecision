@@ -15,6 +15,6 @@ public class SystemControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var summary = Assert.IsType<SystemSummaryResponse>(ok.Value);
-        Assert.Equal("A-share Stock Decision System", summary.Name);
+        Assert.Equal("A股选股与交易决策系统", summary.Name);
     }
 }

@@ -1,3 +1,13 @@
+x-proxy-env: &proxy-env
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  ALL_PROXY: ${ALL_PROXY:-}
+  NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,mysql,api,web}
+  http_proxy: ${HTTP_PROXY:-}
+  https_proxy: ${HTTPS_PROXY:-}
+  all_proxy: ${ALL_PROXY:-}
+  no_proxy: ${NO_PROXY:-localhost,127.0.0.1,mysql,api,web}
+
 services:
   mysql:
     image: mysql:8.4
@@ -8,6 +18,12 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-stock_decision_root_dev}
       TZ: Asia/Shanghai
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     ports:
       - "3306:3306"
     volumes:
@@ -18,45 +34,101 @@ services:
       context: .
       dockerfile: src/StockDecision.Api/Dockerfile
     environment:
+      <<: *proxy-env
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__StockDecision: ${ConnectionStrings__StockDecision:-Server=mysql;Port=3306;Database=stock_decision;User=stock_decision;Password=stock_decision_dev;CharSet=utf8mb4;}
     ports:
       - "5080:8080"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   worker:
     build:
       context: .
       dockerfile: src/StockDecision.Worker/Dockerfile
+    profiles:
+      - worker
     environment:
+      <<: *proxy-env
       ConnectionStrings__StockDecision: ${ConnectionStrings__StockDecision:-Server=mysql;Port=3306;Database=stock_decision;User=stock_decision;Password=stock_decision_dev;CharSet=utf8mb4;}
+      DomainSyncWorker__PollSeconds: ${DOMAIN_SYNC_WORKER_POLL_SECONDS:-60}
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   collector:
     build:
       context: .
       dockerfile: collector/Dockerfile
+    profiles:
+      - jobs
+    entrypoint: ["python", "-m", "stock_collector.jobs"]
+    command: ["health"]
     environment:
+      <<: *proxy-env
       MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_decision}
       MYSQL_USER: ${MYSQL_USER:-stock_decision}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_decision_dev}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
+      COLLECTOR_TIMEZONE: ${COLLECTOR_TIMEZONE:-Asia/Shanghai}
+      COLLECTOR_SCHEDULER_POLL_SECONDS: ${COLLECTOR_SCHEDULER_POLL_SECONDS:-60}
+      COLLECTOR_NIGHT_SYNC_TIME: ${COLLECTOR_NIGHT_SYNC_TIME:-15:20}
+      COLLECTOR_NIGHT_SYNC_DAYS: ${COLLECTOR_NIGHT_SYNC_DAYS:-1,2,3,4,5}
+      COLLECTOR_RETRY_SYNC_TIME_1: ${COLLECTOR_RETRY_SYNC_TIME_1:-16:00}
+      COLLECTOR_RETRY_SYNC_TIME_2: ${COLLECTOR_RETRY_SYNC_TIME_2:-16:30}
+      COLLECTOR_RETRY_SYNC_TIME_3: ${COLLECTOR_RETRY_SYNC_TIME_3:-17:00}
+      COLLECTOR_RETRY_SYNC_TIME_4: ${COLLECTOR_RETRY_SYNC_TIME_4:-18:00}
+      COLLECTOR_RETRY_SYNC_DAYS: ${COLLECTOR_RETRY_SYNC_DAYS:-1,2,3,4,5}
+      COLLECTOR_FINANCIAL_SYNC_TIME: ${COLLECTOR_FINANCIAL_SYNC_TIME:-21:00}
+      COLLECTOR_FINANCIAL_SYNC_DAYS: ${COLLECTOR_FINANCIAL_SYNC_DAYS:-7}
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
+
+  collector-scheduler:
+    build:
+      context: .
+      dockerfile: collector/Dockerfile
+    profiles:
+      - scheduler
+    entrypoint: ["python", "-m", "stock_collector.jobs"]
+    command: ["schedule-sync"]
+    environment:
+      <<: *proxy-env
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_decision}
+      MYSQL_USER: ${MYSQL_USER:-stock_decision}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_decision_dev}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      COLLECTOR_TIMEZONE: ${COLLECTOR_TIMEZONE:-Asia/Shanghai}
+      COLLECTOR_SCHEDULER_POLL_SECONDS: ${COLLECTOR_SCHEDULER_POLL_SECONDS:-60}
+      COLLECTOR_NIGHT_SYNC_TIME: ${COLLECTOR_NIGHT_SYNC_TIME:-15:20}
+      COLLECTOR_NIGHT_SYNC_DAYS: ${COLLECTOR_NIGHT_SYNC_DAYS:-1,2,3,4,5}
+      COLLECTOR_RETRY_SYNC_TIME_1: ${COLLECTOR_RETRY_SYNC_TIME_1:-16:00}
+      COLLECTOR_RETRY_SYNC_TIME_2: ${COLLECTOR_RETRY_SYNC_TIME_2:-16:30}
+      COLLECTOR_RETRY_SYNC_TIME_3: ${COLLECTOR_RETRY_SYNC_TIME_3:-17:00}
+      COLLECTOR_RETRY_SYNC_TIME_4: ${COLLECTOR_RETRY_SYNC_TIME_4:-18:00}
+      COLLECTOR_RETRY_SYNC_DAYS: ${COLLECTOR_RETRY_SYNC_DAYS:-1,2,3,4,5}
+      COLLECTOR_FINANCIAL_SYNC_TIME: ${COLLECTOR_FINANCIAL_SYNC_TIME:-21:00}
+      COLLECTOR_FINANCIAL_SYNC_DAYS: ${COLLECTOR_FINANCIAL_SYNC_DAYS:-7}
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   web:
     build:
       context: .
       dockerfile: web/Dockerfile
     environment:
+      <<: *proxy-env
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5080}
     ports:
       - "5173:5173"
     depends_on:
-      - api
+      api:
+        condition: service_started
 
 volumes:
   mysql_data:

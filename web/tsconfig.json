@@ -10,7 +10,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["node", "vitest"]
+    "types": ["node"]
   },
   "include": ["src/**/*.ts", "src/**/*.vue"]
 }

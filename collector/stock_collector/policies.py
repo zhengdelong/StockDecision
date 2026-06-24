@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
@@ -13,8 +15,13 @@ class InterfaceThrottlePolicy:
     pause_seconds: int | None = None
 
     @classmethod
-    def for_interface(cls, interface_name: str) -> "InterfaceThrottlePolicy":
-        if interface_name == "stock_zh_a_spot_em":
+    def for_interface(
+        cls,
+        interface_name: str,
+        *,
+        mode: str = "incremental",
+    ) -> "InterfaceThrottlePolicy":
+        if interface_name == "stock_zh_a_spot":
             return cls(
                 interface_name=interface_name,
                 max_parallelism=1,
@@ -24,17 +31,39 @@ class InterfaceThrottlePolicy:
                 cooldown_after_batch_seconds=0,
             )
 
-        if interface_name == "stock_zh_a_hist":
+        if interface_name in {"stock_zh_a_daily", "stock_zh_a_hist"}:
+            if mode == "bootstrap":
+                return cls(
+                    interface_name=interface_name,
+                    max_parallelism=1,
+                    min_delay_seconds=0.6,
+                    max_delay_seconds=0.8,
+                    batch_size=80,
+                    cooldown_after_batch_seconds=40,
+                )
+
             return cls(
                 interface_name=interface_name,
-                max_parallelism=3,
-                min_delay_seconds=0.3,
-                max_delay_seconds=0.8,
-                batch_size=100,
+                max_parallelism=1,
+                min_delay_seconds=0.35,
+                max_delay_seconds=0.7,
+                batch_size=150,
                 cooldown_after_batch_seconds=20,
             )
 
-        if interface_name == "stock_financial_analysis_indicator":
+        if interface_name == "stock_financial_abstract_ths_fallback_sina":
+            if mode == "bootstrap":
+                return cls(
+                    interface_name=interface_name,
+                    max_parallelism=1,
+                    min_delay_seconds=1.5,
+                    max_delay_seconds=1.5,
+                    batch_size=1,
+                    cooldown_after_batch_seconds=0,
+                    pause_after_consecutive_failures=5,
+                    pause_seconds=600,
+                )
+
             return cls(
                 interface_name=interface_name,
                 max_parallelism=1,
@@ -44,6 +73,16 @@ class InterfaceThrottlePolicy:
                 cooldown_after_batch_seconds=0,
                 pause_after_consecutive_failures=5,
                 pause_seconds=600,
+            )
+
+        if interface_name == "stock_board_industry_index_ths" and mode == "bootstrap":
+            return cls(
+                interface_name=interface_name,
+                max_parallelism=1,
+                min_delay_seconds=1.0,
+                max_delay_seconds=1.0,
+                batch_size=1,
+                cooldown_after_batch_seconds=0,
             )
 
         return cls(
@@ -68,6 +107,10 @@ class RetryPolicy:
         if attempt <= 0 or attempt > len(self.delays_in_seconds):
             return None
         return self.delays_in_seconds[attempt - 1]
+
+    @property
+    def max_attempts(self) -> int:
+        return len(self.delays_in_seconds) + 1
 
 
 @dataclass(frozen=True)
@@ -100,6 +143,7 @@ class DataCompletenessInput:
     daily_bar_coverage: float
     missing_market_indices: list[str]
     industry_missing_rate: float
+    stock_snapshot_refreshed: bool
 
 
 @dataclass(frozen=True)
@@ -118,6 +162,8 @@ class DataCompletenessPolicy:
             reasons.append("daily_bar_coverage")
         if data.missing_market_indices:
             reasons.append("market_indices")
+        if not data.stock_snapshot_refreshed:
+            reasons.append("stock_snapshot_not_refreshed")
         if data.industry_missing_rate > 0.10:
             reasons.append("industry_missing_rate")
 
