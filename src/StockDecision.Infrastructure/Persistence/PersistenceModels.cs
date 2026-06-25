@@ -31,6 +31,22 @@ public sealed class RawStockRow
     public DateTime CreatedAt { get; set; }
 }
 
+public sealed class LatestRawStockRow
+{
+    public string StockCode { get; set; } = string.Empty;
+    public string StockName { get; set; } = string.Empty;
+    public string? IndustryName { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsSt { get; set; }
+    public bool IsDelistingRisk { get; set; }
+    public DateOnly? ListDate { get; set; }
+    public string InterfaceName { get; set; } = string.Empty;
+    public string BatchId { get; set; } = string.Empty;
+    public DateTime FetchedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// 领域同步运行日志行。
 /// </summary>

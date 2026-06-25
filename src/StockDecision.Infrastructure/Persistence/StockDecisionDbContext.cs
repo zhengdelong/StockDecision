@@ -9,6 +9,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
 {
     /// <summary>原始股票基础信息表。</summary>
     public DbSet<RawStockRow> RawStocks => Set<RawStockRow>();
+    public DbSet<LatestRawStockRow> LatestRawStocks => Set<LatestRawStockRow>();
     /// <summary>原始股票日线表。</summary>
     public DbSet<RawDailyBarRow> RawDailyBars => Set<RawDailyBarRow>();
     /// <summary>原始指数日线表。</summary>
@@ -67,6 +68,29 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.Pb).HasColumnName("pb").HasPrecision(18, 4);
             entity.Property(static item => item.TurnoverRate).HasColumnName("turnover_rate").HasPrecision(10, 4);
             entity.Property(static item => item.CreatedAt).HasColumnName("created_at");
+        });
+
+        modelBuilder.Entity<LatestRawStockRow>(entity =>
+        {
+            entity.ToTable("latest_raw_stocks");
+            entity.HasKey(static item => item.StockCode);
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code");
+            entity.Property(static item => item.StockName).HasColumnName("stock_name");
+            entity.Property(static item => item.IndustryName).HasColumnName("industry_name");
+            entity.Property(static item => item.IsActive).HasColumnName("is_active");
+            entity.Property(static item => item.IsSt).HasColumnName("is_st");
+            entity.Property(static item => item.IsDelistingRisk).HasColumnName("is_delisting_risk");
+            entity.Property(static item => item.ListDate).HasColumnName("list_date");
+            entity.Property(static item => item.InterfaceName).HasColumnName("interface_name");
+            entity.Property(static item => item.BatchId).HasColumnName("batch_id");
+            entity.Property(static item => item.FetchedAt).HasColumnName("fetched_at");
+            entity.Property(static item => item.CreatedAt).HasColumnName("created_at");
+            entity.Property(static item => item.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(static item => item.StockCode).HasMaxLength(16);
+            entity.Property(static item => item.StockName).HasMaxLength(64);
+            entity.Property(static item => item.IndustryName).HasMaxLength(64);
+            entity.Property(static item => item.InterfaceName).HasMaxLength(64);
+            entity.Property(static item => item.BatchId).HasMaxLength(64);
         });
 
         modelBuilder.Entity<RawDailyBarRow>(entity =>

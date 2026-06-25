@@ -369,46 +369,16 @@ def load_scheduler_settings() -> SchedulerSettings:
                 name="sync-end-of-day-final",
                 action="sync-daily",
                 target_scope="sync-end-of-day-final-bars",
-                run_time=_parse_time(_read_env("COLLECTOR_NIGHT_SYNC_TIME", default="15:20")),
+                run_time=_parse_time(_read_env("COLLECTOR_NIGHT_SYNC_TIME", default="16:30")),
                 run_iso_weekdays=_parse_iso_weekdays(
                     _read_env("COLLECTOR_NIGHT_SYNC_DAYS", default="1,2,3,4,5")
                 ),
             ),
             ScheduledCollectorJob(
-                name="sync-end-of-day-retry-1600",
+                name="sync-end-of-day-retry",
                 action="sync-daily",
-                target_scope="sync-end-of-day-retry-1600",
-                run_time=_parse_time(_read_env("COLLECTOR_RETRY_SYNC_TIME_1", default="16:00")),
-                run_iso_weekdays=_parse_iso_weekdays(
-                    _read_env("COLLECTOR_RETRY_SYNC_DAYS", default="1,2,3,4,5")
-                ),
-                skip_when_trade_date_current=True,
-            ),
-            ScheduledCollectorJob(
-                name="sync-end-of-day-retry-1630",
-                action="sync-daily",
-                target_scope="sync-end-of-day-retry-1630",
-                run_time=_parse_time(_read_env("COLLECTOR_RETRY_SYNC_TIME_2", default="16:30")),
-                run_iso_weekdays=_parse_iso_weekdays(
-                    _read_env("COLLECTOR_RETRY_SYNC_DAYS", default="1,2,3,4,5")
-                ),
-                skip_when_trade_date_current=True,
-            ),
-            ScheduledCollectorJob(
-                name="sync-end-of-day-retry-1700",
-                action="sync-daily",
-                target_scope="sync-end-of-day-retry-1700",
-                run_time=_parse_time(_read_env("COLLECTOR_RETRY_SYNC_TIME_3", default="17:00")),
-                run_iso_weekdays=_parse_iso_weekdays(
-                    _read_env("COLLECTOR_RETRY_SYNC_DAYS", default="1,2,3,4,5")
-                ),
-                skip_when_trade_date_current=True,
-            ),
-            ScheduledCollectorJob(
-                name="sync-end-of-day-retry-1800",
-                action="sync-daily",
-                target_scope="sync-end-of-day-retry-1800",
-                run_time=_parse_time(_read_env("COLLECTOR_RETRY_SYNC_TIME_4", default="18:00")),
+                target_scope="sync-end-of-day-retry",
+                run_time=_parse_time(_read_env("COLLECTOR_RETRY_SYNC_TIME", default="18:30")),
                 run_iso_weekdays=_parse_iso_weekdays(
                     _read_env("COLLECTOR_RETRY_SYNC_DAYS", default="1,2,3,4,5")
                 ),

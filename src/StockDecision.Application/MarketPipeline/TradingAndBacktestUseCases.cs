@@ -312,6 +312,11 @@ public sealed class SellSimulatedPositionUseCase(
 public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, IBacktestRunRepository backtestRunRepository)
 {
     private const string StrategyVersion = "a-share-20k-v1";
+    private const decimal BuySlippageRate = 0.001m;
+    private const decimal SellSlippageRate = 0.001m;
+    private const decimal CommissionRate = 0.0003m;
+    private const decimal StampDutyRate = 0.0005m;
+    private const decimal MinimumCommission = 5m;
 
     /// <summary>
     /// 基于已生成的交易信号执行一次同步回测。
@@ -355,6 +360,11 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                 }
 
                 var trade = SimulateTrade(signal, forwardBars);
+                if (trade is null)
+                {
+                    continue;
+                }
+
                 trades.Add(trade);
                 equity *= 1m + trade.ReturnPct / 100m;
                 peakEquity = Math.Max(peakEquity, equity);
@@ -475,9 +485,15 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
     /// <summary>
     /// 用保守顺序模拟单笔交易，优先判定止损。
     /// </summary>
-    internal static BacktestTradeItemResponse SimulateTrade(TradeSignal signal, IReadOnlyList<DailyBar> forwardBars)
+    internal static BacktestTradeItemResponse? SimulateTrade(TradeSignal signal, IReadOnlyList<DailyBar> forwardBars)
     {
-        var entryPrice = signal.TriggerPrice;
+        var firstBar = forwardBars[0];
+        if (ShouldSkipByGapOpen(signal, firstBar))
+        {
+            return null;
+        }
+
+        var entryPrice = Math.Round(firstBar.Open * (1m + BuySlippageRate), 4, MidpointRounding.AwayFromZero);
         var exitPrice = forwardBars[^1].Close;
         var hitTarget = false;
         var hitStopLoss = false;
@@ -508,19 +524,50 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
             exitPrice = bar.Close;
         }
 
-        var returnPct = entryPrice == 0m ? 0m : (exitPrice - entryPrice) / entryPrice * 100m;
+        var adjustedExitPrice = Math.Round(exitPrice * (1m - SellSlippageRate), 4, MidpointRounding.AwayFromZero);
+        var grossBuyAmount = entryPrice * Math.Max(signal.EstimatedShares, 0);
+        var grossSellAmount = adjustedExitPrice * Math.Max(signal.EstimatedShares, 0);
+        var buyCommission = CalculateCommission(grossBuyAmount);
+        var sellCommission = CalculateCommission(grossSellAmount);
+        var stampDuty = grossSellAmount * StampDutyRate;
+        var netBuyAmount = grossBuyAmount + buyCommission;
+        var netSellAmount = grossSellAmount - sellCommission - stampDuty;
+        var returnPct = netBuyAmount == 0m ? 0m : (netSellAmount - netBuyAmount) / netBuyAmount * 100m;
+
         return new BacktestTradeItemResponse(
             signal.TradeDate,
             signal.StockCode,
             signal.StockName,
             MarketResponseMapper.FormatStrategyType(signal.StrategyType),
-            Math.Round(entryPrice, 4, MidpointRounding.AwayFromZero),
-            Math.Round(exitPrice, 4, MidpointRounding.AwayFromZero),
+            entryPrice,
+            adjustedExitPrice,
             Math.Round(returnPct, 2, MidpointRounding.AwayFromZero),
             Math.Round(maxGainPct == decimal.MinValue ? 0m : maxGainPct, 2, MidpointRounding.AwayFromZero),
             Math.Round(maxDrawdownPct == decimal.MaxValue ? 0m : maxDrawdownPct, 2, MidpointRounding.AwayFromZero),
             hitTarget,
             hitStopLoss);
+    }
+
+    private static decimal CalculateCommission(decimal amount)
+    {
+        if (amount <= 0m)
+        {
+            return 0m;
+        }
+
+        return Math.Max(amount * CommissionRate, MinimumCommission);
+    }
+
+    private static bool ShouldSkipByGapOpen(TradeSignal signal, DailyBar firstBar)
+    {
+        if (signal.TriggerPrice <= 0m || firstBar.Open <= 0m)
+        {
+            return true;
+        }
+
+        var gapOpenPct = (firstBar.Open - signal.TriggerPrice) / signal.TriggerPrice * 100m;
+        var maxGapPct = signal.StrategyType is StrategyType.PullbackToMa20 or StrategyType.WatchPullback ? 2m : 3m;
+        return gapOpenPct > maxGapPct;
     }
 }
 

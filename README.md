@@ -97,13 +97,16 @@ image and triggers incremental jobs based on `.env` settings:
 - `COLLECTOR_INTRADAY_SYNC_DAYS`
 - `COLLECTOR_NIGHT_SYNC_TIME`
 - `COLLECTOR_NIGHT_SYNC_DAYS`
+- `COLLECTOR_RETRY_SYNC_TIME`
+- `COLLECTOR_RETRY_SYNC_DAYS`
 - `COLLECTOR_FINANCIAL_SYNC_TIME`
 - `COLLECTOR_FINANCIAL_SYNC_DAYS`
 
 Default behavior:
 
 - intraday market sync at `11:30` on ISO weekdays `1,2,3,4,5`
-- night market sync at `18:30` on ISO weekdays `1,2,3,4,5`
+- first end-of-day market sync at `16:30` on ISO weekdays `1,2,3,4,5`
+- retry market sync at `18:30` on ISO weekdays `1,2,3,4,5`
 - financial sync at `21:00` on ISO weekday `7` (Sunday)
 
 Current timetable in `Asia/Shanghai`:
@@ -111,7 +114,8 @@ Current timetable in `Asia/Shanghai`:
 | Task | Purpose | Schedule |
 | --- | --- | --- |
 | `sync-daily-intraday` | stock snapshot, daily bars, index bars, industry stats | Monday-Friday `11:30` |
-| `sync-daily-night` | stock snapshot, daily bars, index bars, industry stats | Monday-Friday `18:30` |
+| `sync-daily-night` | stock snapshot, daily bars, index bars, industry stats | Monday-Friday `16:30` |
+| `sync-daily-retry` | stock snapshot, daily bars, index bars, industry stats | Monday-Friday `18:30` |
 | `sync-financials` | financial snapshot sync | Sunday `21:00` |
 
 Scheduler behavior:

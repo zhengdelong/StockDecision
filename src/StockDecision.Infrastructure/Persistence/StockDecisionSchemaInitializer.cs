@@ -18,6 +18,39 @@ public static class StockDecisionSchemaInitializer
             await dbContext.Database.ExecuteSqlRawAsync(statement, cancellationToken);
         }
 
+        if (!await TableHasRowsAsync(dbContext, "latest_raw_stocks", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO latest_raw_stocks (
+                    stock_code, stock_name, industry_name, is_active, is_st, is_delisting_risk,
+                    list_date, interface_name, batch_id, fetched_at, created_at, updated_at
+                )
+                SELECT src.stock_code, src.stock_name, src.industry_name, src.is_active, src.is_st, src.is_delisting_risk,
+                       src.list_date, src.interface_name, src.batch_id, src.fetched_at, src.created_at, src.created_at
+                FROM raw_stocks AS src
+                INNER JOIN (
+                    SELECT stock_code, MAX(created_at) AS max_created_at
+                    FROM raw_stocks
+                    GROUP BY stock_code
+                ) AS latest
+                    ON latest.stock_code = src.stock_code AND latest.max_created_at = src.created_at
+                ON DUPLICATE KEY UPDATE
+                    stock_name = VALUES(stock_name),
+                    industry_name = VALUES(industry_name),
+                    is_active = VALUES(is_active),
+                    is_st = VALUES(is_st),
+                    is_delisting_risk = VALUES(is_delisting_risk),
+                    list_date = VALUES(list_date),
+                    interface_name = VALUES(interface_name),
+                    batch_id = VALUES(batch_id),
+                    fetched_at = VALUES(fetched_at),
+                    created_at = VALUES(created_at),
+                    updated_at = VALUES(updated_at)
+                """,
+                cancellationToken);
+        }
+
         await EnsureSnapshotVersionColumnsAsync(dbContext, cancellationToken);
     }
 
@@ -126,6 +159,34 @@ public static class StockDecisionSchemaInitializer
         }
     }
 
+    private static async Task<bool> TableHasRowsAsync(
+        StockDecisionDbContext dbContext,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        var openedHere = connection.State != ConnectionState.Open;
+        if (openedHere)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT 1 FROM {tableName} LIMIT 1";
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null;
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
     /// <summary>
     /// 检查当前主键列顺序是否已经符合预期。
     /// </summary>
@@ -187,6 +248,24 @@ public static class StockDecisionSchemaInitializer
 
     private static readonly string[] CreateTableStatements =
     [
+        """
+        CREATE TABLE IF NOT EXISTS latest_raw_stocks (
+            stock_code VARCHAR(16) NOT NULL,
+            stock_name VARCHAR(64) NOT NULL,
+            industry_name VARCHAR(64) NULL,
+            is_active TINYINT(1) NOT NULL,
+            is_st TINYINT(1) NOT NULL,
+            is_delisting_risk TINYINT(1) NOT NULL,
+            list_date DATE NULL,
+            interface_name VARCHAR(64) NOT NULL,
+            batch_id VARCHAR(64) NOT NULL,
+            fetched_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (stock_code),
+            INDEX idx_latest_raw_stocks_fetched_at (fetched_at)
+        )
+        """,
         """
         CREATE TABLE IF NOT EXISTS market_stock_profiles (
             stock_code VARCHAR(16) NOT NULL,

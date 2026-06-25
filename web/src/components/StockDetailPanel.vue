@@ -272,6 +272,7 @@ const executionScenario = computed(() => {
         <div v-if="props.stockDetail.recentBars.length" class="svg-shell">
           <StockPriceChart :stock-detail="props.stockDetail" />
           <div class="chart-footnote">
+            <span>Red = up / positive, Green = down / negative</span>
             <span>横轴：交易日</span>
             <span>上图为价格与均线，中图为成交量，下图为 MACD</span>
           </div>

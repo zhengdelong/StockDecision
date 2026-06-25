@@ -87,6 +87,24 @@ raw_stocks_table = Table(
     Index("idx_raw_stocks_fetched_at", "fetched_at"),
 )
 
+latest_raw_stocks_table = Table(
+    "latest_raw_stocks",
+    RAW_TABLE_METADATA,
+    Column("stock_code", String(16), primary_key=True),
+    Column("stock_name", String(64), nullable=False),
+    Column("industry_name", String(64), nullable=True),
+    Column("list_date", Date, nullable=True),
+    Column("is_st", Boolean, nullable=False, default=False),
+    Column("is_delisting_risk", Boolean, nullable=False, default=False),
+    Column("is_active", Boolean, nullable=False, default=True),
+    Column("interface_name", String(64), nullable=False),
+    Column("batch_id", String(64), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Index("idx_latest_raw_stocks_fetched_at", "fetched_at"),
+)
+
 raw_daily_bars_table = Table(
     "raw_daily_bars",
     RAW_TABLE_METADATA,
@@ -258,7 +276,13 @@ RAW_TABLES: dict[str, Table] = {
 
 
 def create_mysql_engine(settings: MySqlSettings, *, echo: bool = False) -> Engine:
-    return create_engine(settings.to_sqlalchemy_url(), echo=echo, future=True)
+    return create_engine(
+        settings.to_sqlalchemy_url(),
+        echo=echo,
+        future=True,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
 
 
 def create_in_memory_engine() -> Engine:
@@ -288,7 +312,33 @@ class RawDataWriter:
                 if delete_filters:
                     connection.execute(table.delete().where(*delete_filters))
             connection.execute(table.insert(), normalized_rows)
+            if table_name == "raw_stocks":
+                self._upsert_latest_raw_stocks(connection, normalized_rows)
         return len(normalized_rows)
+
+    @staticmethod
+    def _upsert_latest_raw_stocks(connection: Any, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            connection.execute(
+                latest_raw_stocks_table.delete().where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
+            )
+            connection.execute(
+                latest_raw_stocks_table.insert(),
+                [{
+                    "stock_code": row["stock_code"],
+                    "stock_name": row["stock_name"],
+                    "industry_name": row.get("industry_name"),
+                    "list_date": row.get("list_date"),
+                    "is_st": row["is_st"],
+                    "is_delisting_risk": row["is_delisting_risk"],
+                    "is_active": row["is_active"],
+                    "interface_name": row["interface_name"],
+                    "batch_id": row["batch_id"],
+                    "fetched_at": row["fetched_at"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["created_at"],
+                }],
+            )
 
     def append_log(self, row: dict[str, Any]) -> None:
         normalized = self._normalize_row("data_ingestion_logs", row)

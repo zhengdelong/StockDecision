@@ -23,22 +23,85 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
     /// </summary>
     public async Task<IReadOnlyList<StockProfile>> GetLatestStockProfilesAsync(DateOnly tradeDate, CancellationToken cancellationToken)
     {
-        var latestStocks = await dbContext.RawStocks
+        var latestStocksFastPath = await dbContext.LatestRawStocks
+            .AsNoTracking()
             .Where(static item => !item.StockCode.StartsWith("sh") && !item.StockCode.StartsWith("sz") && !item.StockCode.StartsWith("bj"))
-            .GroupBy(static item => item.StockCode)
-            .Select(static group => group
-                .OrderByDescending(item => item.CreatedAt)
-                .Select(item => new
+            .Select(static item => new
+            {
+                item.StockCode,
+                item.StockName,
+                item.IndustryName,
+                item.IsActive,
+                item.IsSt,
+                item.IsDelistingRisk,
+                item.ListDate
+            })
+            .ToListAsync(cancellationToken);
+
+        if (latestStocksFastPath.Count > 0)
+        {
+            var amountHistoryFastPath = await dbContext.RawDailyBars
+                .AsNoTracking()
+                .Where(item => item.TradeDate <= tradeDate)
+                .GroupBy(static item => item.StockCode)
+                .Select(group => new
                 {
+                    StockCode = group.Key,
+                    AverageAmount20d = group
+                        .OrderByDescending(item => item.TradeDate)
+                        .Take(20)
+                        .Average(item => item.Amount ?? 0m)
+                })
+                .ToDictionaryAsync(static item => item.StockCode, static item => (decimal?)item.AverageAmount20d, cancellationToken);
+
+            var latestDailyFastPath = await dbContext.RawDailyBars
+                .AsNoTracking()
+                .Where(item => item.TradeDate == tradeDate)
+                .ToDictionaryAsync(static item => item.StockCode, cancellationToken);
+
+            var latestFinancialFastPath = await dbContext.RawFinancialSnapshots
+                .AsNoTracking()
+                .GroupBy(static item => item.StockCode)
+                .Select(static group => group.OrderByDescending(item => item.ReportDate).First())
+                .ToDictionaryAsync(static item => item.StockCode, cancellationToken);
+
+            return latestStocksFastPath.Select(item =>
+            {
+                latestDailyFastPath.TryGetValue(item.StockCode, out var latestBar);
+                latestFinancialFastPath.TryGetValue(item.StockCode, out var financial);
+                amountHistoryFastPath.TryGetValue(item.StockCode, out var averageAmount20d);
+
+                return new StockProfile(
                     item.StockCode,
                     item.StockName,
                     item.IndustryName,
                     item.IsActive,
                     item.IsSt,
                     item.IsDelistingRisk,
-                    item.ListDate
-                })
-                .First())
+                    item.ListDate,
+                    latestBar?.Close,
+                    financial?.Pe,
+                    financial?.Pb,
+                    financial?.FreeFloatMarketCap,
+                    latestBar?.TurnoverRate,
+                    averageAmount20d,
+                    tradeDate);
+            }).ToList();
+        }
+
+        var latestStocks = await dbContext.LatestRawStocks
+            .AsNoTracking()
+            .Where(static item => !item.StockCode.StartsWith("sh") && !item.StockCode.StartsWith("sz") && !item.StockCode.StartsWith("bj"))
+            .Select(static item => new
+            {
+                item.StockCode,
+                item.StockName,
+                item.IndustryName,
+                item.IsActive,
+                item.IsSt,
+                item.IsDelistingRisk,
+                item.ListDate
+            })
             .ToListAsync(cancellationToken);
 
         // 行业和上市日期属于低频元数据，若最新快照缺失，则沿用历史上最近一次非空值。

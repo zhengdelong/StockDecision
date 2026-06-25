@@ -71,7 +71,7 @@ function buildDetailChartOption(): any {
     return {
       value: item.volume / 10000,
       itemStyle: {
-        color: item.close >= previous ? 'rgba(34, 197, 94, 0.78)' : 'rgba(239, 68, 68, 0.74)',
+        color: item.close >= previous ? 'rgba(239, 68, 68, 0.74)' : 'rgba(34, 197, 94, 0.78)',
       },
     }
   })
