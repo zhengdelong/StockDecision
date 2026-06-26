@@ -22,6 +22,11 @@ def test_raw_data_writer_creates_tables_with_new_columns() -> None:
     assert "raw_payload" in columns
     assert "created_at" in columns
 
+    stock_columns = {column["name"] for column in inspector.get_columns("raw_stocks")}
+    assert "pe" in stock_columns
+    assert "pb" in stock_columns
+    assert "turnover_rate" in stock_columns
+
     log_columns = {column["name"] for column in inspector.get_columns("data_ingestion_logs")}
     assert "target_scope" in log_columns
     assert "is_signal_eligible" in log_columns

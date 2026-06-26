@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import date
 from datetime import timedelta
 from typing import Any
+import time
+
+import requests
 
 class AkshareClientError(RuntimeError):
     pass
@@ -38,7 +41,23 @@ class AkshareClient:
 
     def fetch_stock_spot_snapshot(self) -> list[dict[str, Any]]:
         provider = self._get_provider()
-        rows = self._to_records(provider.stock_zh_a_spot())
+        rows = None
+        if self.provider is None:
+            try:
+                rows = self._fetch_tencent_stock_spot_snapshot()
+            except Exception:  # noqa: BLE001
+                try:
+                    rows = self._fetch_eastmoney_stock_spot_snapshot()
+                except Exception:  # noqa: BLE001
+                    rows = None
+
+        if rows is None and hasattr(provider, "stock_zh_a_spot_em"):
+            try:
+                rows = self._to_records(provider.stock_zh_a_spot_em())
+            except Exception:  # noqa: BLE001
+                rows = self._to_records(provider.stock_zh_a_spot())
+        elif rows is None:
+            rows = self._to_records(provider.stock_zh_a_spot())
         industry_map = self._build_stock_metadata_map(provider)
         if not industry_map:
             return rows
@@ -211,6 +230,66 @@ class AkshareClient:
             item["rank_20d"] = index
         return ranked
 
+    def _fetch_tencent_stock_spot_snapshot(self) -> list[dict[str, Any]]:
+        url = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 200
+        while True:
+            payload = self._request_json_with_retry(
+                url,
+                {
+                    "_appver": "11.17.0",
+                    "board_code": "aStock",
+                    "sort_type": "price",
+                    "direct": "down",
+                    "offset": str(offset),
+                    "count": str(page_size),
+                },
+            )
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise AkshareClientError("Tencent spot snapshot missing data object.")
+            rank_list = data.get("rank_list")
+            if not isinstance(rank_list, list):
+                raise AkshareClientError("Tencent spot snapshot missing rank list.")
+            if not rank_list:
+                break
+            rows.extend(self._map_tencent_stock_spot_row(dict(item)) for item in rank_list)
+            if len(rank_list) < page_size:
+                break
+            offset += page_size
+        return rows
+
+    def _fetch_eastmoney_stock_spot_snapshot(self) -> list[dict[str, Any]]:
+        url = "https://82.push2.eastmoney.com/api/qt/clist/get"
+        base_params = {
+            "pn": "1",
+            "pz": "100",
+            "po": "1",
+            "np": "1",
+            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "fltt": "2",
+            "invt": "2",
+            "fid": "f12",
+            "fs": "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
+            "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,"
+            "f20,f21,f23,f24,f25,f22,f11,f62,f128,f136,f115,f152",
+        }
+        first_page = self._request_json_with_retry(url, base_params)
+        diff = self._extract_eastmoney_diff(first_page)
+        total = int(first_page["data"].get("total") or len(diff))
+        page_size = max(len(diff), 1)
+        total_pages = (total + page_size - 1) // page_size
+        rows = [self._map_eastmoney_stock_spot_row(row) for row in diff]
+        for page in range(2, total_pages + 1):
+            params = dict(base_params)
+            params["pn"] = str(page)
+            page_payload = self._request_json_with_retry(url, params)
+            page_rows = self._extract_eastmoney_diff(page_payload)
+            rows.extend(self._map_eastmoney_stock_spot_row(row) for row in page_rows)
+        return rows
+
     def _get_provider(self) -> Any:
         if self.provider is not None:
             return self.provider
@@ -249,6 +328,85 @@ class AkshareClient:
         return filtered
 
     @staticmethod
+    def _request_json_with_retry(url: str, params: dict[str, str], *, timeout: int = 15, max_retries: int = 3) -> dict[str, Any]:
+        last_exception: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, params=params, timeout=timeout)
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise AkshareClientError("EastMoney spot snapshot returned non-dict payload.")
+                return payload
+            except (requests.RequestException, ValueError, AkshareClientError) as exc:
+                last_exception = exc
+                if attempt < max_retries - 1:
+                    time.sleep(1 + attempt)
+        raise AkshareClientError("EastMoney spot snapshot request failed.") from last_exception
+
+    @staticmethod
+    def _extract_eastmoney_diff(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise AkshareClientError("EastMoney spot snapshot missing data object.")
+        diff = data.get("diff")
+        if diff in (None, []):
+            return []
+        if not isinstance(diff, list):
+            raise AkshareClientError("EastMoney spot snapshot returned non-list diff payload.")
+        return [dict(row) for row in diff]
+
+    @staticmethod
+    def _map_eastmoney_stock_spot_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "代码": row.get("f12"),
+            "名称": row.get("f14"),
+            "最新价": row.get("f2"),
+            "涨跌幅": row.get("f3"),
+            "涨跌额": row.get("f4"),
+            "成交量": row.get("f5"),
+            "成交额": row.get("f6"),
+            "振幅": row.get("f7"),
+            "换手率": row.get("f8"),
+            "市盈率-动态": row.get("f9"),
+            "量比": row.get("f10"),
+            "最高": row.get("f15"),
+            "最低": row.get("f16"),
+            "今开": row.get("f17"),
+            "昨收": row.get("f18"),
+            "总市值": row.get("f20"),
+            "流通市值": row.get("f21"),
+            "涨速": row.get("f22"),
+            "市净率": row.get("f23"),
+            "60日涨跌幅": row.get("f24"),
+            "年初至今涨跌幅": row.get("f25"),
+            **row,
+        }
+
+    @staticmethod
+    def _map_tencent_stock_spot_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "代码": row.get("code"),
+            "名称": row.get("name"),
+            "最新价": row.get("zxj"),
+            "涨跌幅": row.get("zdf"),
+            "涨跌额": row.get("zd"),
+            "成交量": row.get("turnover"),
+            "成交额": row.get("volume"),
+            "振幅": row.get("zf"),
+            "换手率": row.get("hsl"),
+            "市盈率TTM": row.get("pe_ttm"),
+            "市净率": row.get("pn"),
+            "量比": row.get("lb"),
+            "总市值": row.get("zsz"),
+            "流通市值": row.get("ltsz"),
+            "涨速": row.get("speed"),
+            "60日涨跌幅": row.get("zdf_d60"),
+            "年初至今涨跌幅": row.get("zdf_y"),
+            **row,
+        }
+
+    @staticmethod
     def _map_index_daily_row(row: dict[str, Any]) -> dict[str, Any]:
         if "date" not in row and "open" not in row and "close" not in row:
             return row
@@ -284,8 +442,8 @@ class AkshareClient:
             "revenue_yoy": row.get("revenue_yoy") or row.get("营业总收入同比增长率"),
             "net_profit_yoy": row.get("net_profit_yoy") or row.get("净利润同比增长率"),
             "operating_cash_flow": row.get("operating_cash_flow") or row.get("每股经营现金流"),
-            "pe": row.get("pe"),
-            "pb": row.get("pb"),
+            "pe": row.get("pe") or row.get("市盈率") or row.get("市盈率TTM") or row.get("市盈率(TTM)"),
+            "pb": row.get("pb") or row.get("市净率"),
             "free_float_market_cap": row.get("free_float_market_cap"),
             **row,
         }

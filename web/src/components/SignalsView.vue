@@ -175,7 +175,7 @@ function resolveExecutionLabel(item: SignalItem): string {
             <td>
               <div class="candidate-status-cell">
                 <span class="pill positive">可执行</span>
-                <small>{{ resolveExecutionLabel(item) }}</small>
+                <small>{{ item.eligibilityReasons[0] ?? resolveExecutionLabel(item) }}</small>
               </div>
             </td>
           </tr>

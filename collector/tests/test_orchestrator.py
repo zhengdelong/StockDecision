@@ -21,7 +21,7 @@ class FakeProvider:
 
     def stock_zh_a_spot(self):
         return [
-            {"代码": "600000", "名称": "浦发银行", "所处行业": "银行"},
+            {"代码": "600000", "名称": "浦发银行", "所处行业": "银行", "市盈率TTM": "6.82", "市净率": "0.58"},
             {"代码": "000001", "名称": "平安银行", "所处行业": "银行"},
         ]
 
@@ -90,8 +90,10 @@ def test_collect_stock_snapshot_writes_raw_rows() -> None:
 
     assert result.rows_written == 2
     with writer.engine.connect() as connection:
-        count = connection.execute(select(raw_stocks_table.c.stock_code)).all()
-    assert len(count) == 2
+        rows = connection.execute(select(raw_stocks_table.c.stock_code, raw_stocks_table.c.pe, raw_stocks_table.c.pb)).all()
+    assert len(rows) == 2
+    assert rows[0][1] is not None
+    assert rows[0][2] is not None
 
 
 def test_bootstrap_daily_bars_uses_checkpoints_and_marks_partial_when_coverage_low() -> None:

@@ -15,8 +15,31 @@ public sealed record LearningReviewItemResponse(
     string ExecutionDiscipline,
     string ResultSummary,
     string ImprovementPlan,
+    IReadOnlyList<string> ErrorTags,
+    bool IsStrategyAligned,
+    bool FollowedStopLoss,
+    bool FollowedTakeProfit,
+    bool ModifiedPlanDuringTrade,
+    bool FollowedGapRule,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
+
+/// <summary>
+/// 学习进度摘要。
+/// </summary>
+public sealed record LearningProgressSummaryResponse(
+    int ReviewCount,
+    int StrategyAlignedTradeCount,
+    int OffStrategyTradeCount,
+    int ConsecutiveStopLossFollowCount,
+    int ConsecutiveGapRuleFollowCount);
+
+/// <summary>
+/// 复盘错误标签统计。
+/// </summary>
+public sealed record LearningErrorTagStatResponse(
+    string Tag,
+    int Count);
 
 /// <summary>
 /// 学习复盘页面所需的概览数据。
@@ -27,6 +50,8 @@ public sealed record LearningReviewOverviewResponse(
     DateOnly? TradeDate,
     string SnapshotVersion,
     IReadOnlyList<string> ReviewPrompts,
+    LearningProgressSummaryResponse ProgressSummary,
+    IReadOnlyList<LearningErrorTagStatResponse> ErrorTagStats,
     IReadOnlyList<LearningReviewItemResponse> Reviews);
 
 /// <summary>
@@ -66,6 +91,24 @@ public sealed record SaveLearningReviewRequest
 
     /// <summary>下次准备怎么改进。</summary>
     public string ImprovementPlan { get; init; } = string.Empty;
+
+    /// <summary>错误标签。</summary>
+    public IReadOnlyList<string>? ErrorTags { get; init; }
+
+    /// <summary>是否属于策略内交易。</summary>
+    public bool IsStrategyAligned { get; init; } = true;
+
+    /// <summary>是否执行了止损纪律。</summary>
+    public bool FollowedStopLoss { get; init; }
+
+    /// <summary>是否执行了止盈纪律。</summary>
+    public bool FollowedTakeProfit { get; init; }
+
+    /// <summary>是否中途改计划。</summary>
+    public bool ModifiedPlanDuringTrade { get; init; }
+
+    /// <summary>是否遵守高开放弃规则。</summary>
+    public bool FollowedGapRule { get; init; }
 }
 
 /// <summary>
@@ -98,4 +141,10 @@ public sealed record LearningReviewDraft(
     string ExecutionDiscipline,
     string ResultSummary,
     string ImprovementPlan,
+    IReadOnlyList<string> ErrorTags,
+    bool IsStrategyAligned,
+    bool FollowedStopLoss,
+    bool FollowedTakeProfit,
+    bool ModifiedPlanDuringTrade,
+    bool FollowedGapRule,
     DateTime TimestampUtc);

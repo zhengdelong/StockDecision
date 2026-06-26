@@ -148,6 +148,20 @@ public sealed class BacktestRunEntity
 
     /// <summary>总收益率。</summary>
     public decimal TotalReturnPct { get; set; }
+    /// <summary>基准收益率。</summary>
+    public decimal BenchmarkReturnPct { get; set; }
+    /// <summary>数据覆盖率。</summary>
+    public decimal DataCoveragePct { get; set; }
+    /// <summary>跳过交易日数。</summary>
+    public int SkippedTradeDays { get; set; }
+    /// <summary>年化交易次数。</summary>
+    public decimal AnnualTradeCount { get; set; }
+    /// <summary>最大连续亏损次数。</summary>
+    public int MaxConsecutiveLosses { get; set; }
+    /// <summary>是否通过准入。</summary>
+    public bool IsApproved { get; set; }
+    /// <summary>未通过原因。</summary>
+    public string FailureReasons { get; set; } = string.Empty;
 
     /// <summary>平均持有天数。</summary>
     public decimal AverageHoldingDays { get; set; }

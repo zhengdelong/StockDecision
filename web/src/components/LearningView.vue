@@ -22,6 +22,12 @@ const emit = defineEmits<{
       executionDiscipline: string
       resultSummary: string
       improvementPlan: string
+      errorTags: string[]
+      isStrategyAligned: boolean
+      followedStopLoss: boolean
+      followedTakeProfit: boolean
+      modifiedPlanDuringTrade: boolean
+      followedGapRule: boolean
     }
   ): void
 }>()
@@ -32,6 +38,7 @@ const form = reactive({
   executionDiscipline: '',
   resultSummary: '',
   improvementPlan: '',
+  errorTags: '',
 })
 
 watch(
@@ -42,6 +49,7 @@ watch(
     form.executionDiscipline = ''
     form.resultSummary = ''
     form.improvementPlan = ''
+    form.errorTags = ''
   },
 )
 
@@ -59,12 +67,40 @@ function submit() {
     executionDiscipline: form.executionDiscipline,
     resultSummary: form.resultSummary,
     improvementPlan: form.improvementPlan,
+    errorTags: form.errorTags.split(/[，,]/).map(item => item.trim()).filter(Boolean),
+    isStrategyAligned: !form.errorTags.includes('策略外交易'),
+    followedStopLoss: !form.errorTags.includes('不按止损'),
+    followedTakeProfit: !form.errorTags.includes('过早止盈'),
+    modifiedPlanDuringTrade: form.errorTags.includes('情绪化交易'),
+    followedGapRule: !form.errorTags.includes('追高'),
   })
 }
 </script>
 
 <template>
   <div class="system-layout">
+    <article class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="card-label">学习进度</p>
+          <h3>先看纪律有没有稳定下来</h3>
+        </div>
+      </div>
+
+      <div v-if="overview?.progressSummary" class="detail-grid">
+        <div><span>复盘数量</span><strong>{{ overview.progressSummary.reviewCount }}</strong></div>
+        <div><span>策略内交易</span><strong>{{ overview.progressSummary.strategyAlignedTradeCount }}</strong></div>
+        <div><span>策略外交易</span><strong>{{ overview.progressSummary.offStrategyTradeCount }}</strong></div>
+        <div><span>连续按止损</span><strong>{{ overview.progressSummary.consecutiveStopLossFollowCount }}</strong></div>
+        <div><span>连续守高开规则</span><strong>{{ overview.progressSummary.consecutiveGapRuleFollowCount }}</strong></div>
+      </div>
+      <div v-if="overview?.errorTagStats?.length" class="toolbar" style="padding-top: 0;">
+        <span v-for="item in overview.errorTagStats" :key="item.tag" class="pill neutral">
+          {{ item.tag }} {{ item.count }}
+        </span>
+      </div>
+    </article>
+
     <article class="panel-card">
       <div class="panel-head">
         <div>
@@ -108,6 +144,10 @@ function submit() {
           <span>下次改进点</span>
           <input v-model="form.improvementPlan" type="text" placeholder="如果再来一次，你最想改掉什么？">
         </label>
+        <label class="field" style="display: grid; gap: 8px;">
+          <span>错误标签</span>
+          <input v-model="form.errorTags" type="text" placeholder="例如：追高, 不按止损, 情绪化交易">
+        </label>
         <button class="minor-button" :disabled="isSubmitting" @click="submit">
           {{ isSubmitting ? '正在保存...' : '保存复盘记录' }}
         </button>
@@ -136,6 +176,7 @@ function submit() {
               <th>纪律执行</th>
               <th>结果</th>
               <th>改进点</th>
+              <th>标签</th>
             </tr>
           </thead>
           <tbody>
@@ -149,6 +190,7 @@ function submit() {
               <td>{{ item.executionDiscipline }}</td>
               <td>{{ item.resultSummary }}</td>
               <td>{{ item.improvementPlan }}</td>
+              <td>{{ item.errorTags.join('、') }}</td>
             </tr>
           </tbody>
         </table>

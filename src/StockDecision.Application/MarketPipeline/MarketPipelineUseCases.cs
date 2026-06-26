@@ -31,7 +31,8 @@ internal static class StrategySnapshotVersionResolver
 public sealed class EnsureLatestMarketSnapshotUseCase(
     IRawMarketDataRepository rawRepository,
     IMarketDataRepository marketRepository,
-    IIngestionLogRepository ingestionLogRepository)
+    IIngestionLogRepository ingestionLogRepository,
+    TradingPermissionsOptions tradingPermissions)
 {
     public async Task<MarketSnapshotSyncState> InspectAsync(CancellationToken cancellationToken = default)
     {
@@ -210,7 +211,15 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
 
             financials.TryGetValue(indicator.StockCode, out var financial);
             industries.TryGetValue(profile.IndustryName ?? string.Empty, out var industry);
-            var candidate = CandidatePolicy.Evaluate(tradeDate, profile, indicator, financial, industry, regime);
+            var candidate = CandidatePolicy.Evaluate(
+                tradeDate,
+                profile,
+                indicator,
+                financial,
+                industry,
+                regime,
+                TradingBoardClassifier.IsInTradablePool(profile.StockCode, tradingPermissions),
+                TradingBoardClassifier.IsInWatchPool(profile.StockCode));
             if (candidate is not null)
             {
                 candidates.Add(candidate);
@@ -234,7 +243,8 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
 public sealed class GetDashboardUseCase(
     EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
     IMarketDataRepository marketRepository,
-    IIngestionLogRepository ingestionLogRepository)
+    IIngestionLogRepository ingestionLogRepository,
+    IBacktestRunRepository backtestRunRepository)
 {
     /// <summary>
     /// 返回首页仪表盘响应。
@@ -246,20 +256,25 @@ public sealed class GetDashboardUseCase(
         var tradeDate = await ensureLatestSnapshot.ExecuteAsync(snapshotVersion, cancellationToken);
         if (tradeDate is null)
         {
-            return new DashboardResponse(null, snapshotVersion.ToValue(), snapshotVersion.ToDisplayName(), false, false, "暂无数据", 0, 0, null, []);
+            return new DashboardResponse(null, snapshotVersion.ToValue(), snapshotVersion.ToDisplayName(), false, false, false, "还没有可用回测记录，暂不开放可执行信号。", "暂无数据", 0, 0, null, []);
         }
 
         var candidates = await marketRepository.GetCandidatesAsync(tradeDate.Value, snapshotVersion, cancellationToken);
-        var signals = await marketRepository.GetSignalsAsync(tradeDate.Value, snapshotVersion, cancellationToken);
+        var rawSignals = await marketRepository.GetSignalsAsync(tradeDate.Value, snapshotVersion, cancellationToken);
         var regime = await marketRepository.GetMarketRegimeAsync(tradeDate.Value, snapshotVersion, cancellationToken);
         var latestIngestion = await ingestionLogRepository.GetLatestSuccessfulIngestionAtUtcAsync(cancellationToken);
+        var backtestApproval = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
+        var isSignalEligible = (regime?.IsSignalEligible ?? false) && backtestApproval.IsApproved;
+        var signals = isSignalEligible ? rawSignals : [];
 
         return new DashboardResponse(
             tradeDate.Value,
             snapshotVersion.ToValue(),
             snapshotVersion.ToDisplayName(),
             true,
-            regime?.IsSignalEligible ?? false,
+            isSignalEligible,
+            backtestApproval.IsApproved,
+            backtestApproval.StatusNote,
             MarketResponseMapper.FormatMarketRegime(regime?.Regime),
             candidates.Count,
             signals.Count,
@@ -268,6 +283,7 @@ public sealed class GetDashboardUseCase(
                 new DashboardMetricResponse("tradeDate", "交易日", tradeDate.Value.ToString("yyyy-MM-dd"), "neutral"),
                 new DashboardMetricResponse("snapshotVersion", "结果版本", snapshotVersion.ToDisplayName(), snapshotVersion == StrategySnapshotVersion.EndOfDayFinal ? "positive" : "warning"),
                 new DashboardMetricResponse("regime", "市场环境", MarketResponseMapper.FormatMarketRegime(regime?.Regime), regime?.IsSignalEligible == true ? "positive" : "warning"),
+                new DashboardMetricResponse("backtest", "回测准入", backtestApproval.IsApproved ? "已通过" : "未通过", backtestApproval.IsApproved ? "positive" : "warning"),
                 new DashboardMetricResponse("candidates", "候选池", candidates.Count.ToString(), "neutral"),
                 new DashboardMetricResponse("signals", "交易信号", signals.Count.ToString(), signals.Count > 0 ? "positive" : "neutral")
             ]);
@@ -302,6 +318,8 @@ public sealed class GetCandidatesUseCase(
                 MarketResponseMapper.FormatCandidateGrade(item.Grade),
                 MarketResponseMapper.FormatStrategyType(item.StrategyType),
                 item.IsTradable,
+                MarketResponseMapper.FormatEligibilityStatus(item.EligibilityStatus),
+                MarketResponseMapper.BuildEligibilityReasons(item.EligibilityReason),
                 item.TotalScore,
                 item.ScoreBreakdown,
                 item.Close,
@@ -352,7 +370,8 @@ public sealed class GetCandidatesUseCase(
 /// </summary>
 public sealed class GetTodaySignalsUseCase(
     EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
-    IMarketDataRepository marketRepository)
+    IMarketDataRepository marketRepository,
+    IBacktestRunRepository backtestRunRepository)
 {
     /// <summary>
     /// 返回指定交易日或最新交易日的交易信号分页列表。
@@ -366,13 +385,18 @@ public sealed class GetTodaySignalsUseCase(
             return new PagedResponse<SignalListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
         }
 
-        var signals = await marketRepository.GetSignalsAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
+        var backtestApproval = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
+        var signals = backtestApproval.IsApproved
+            ? await marketRepository.GetSignalsAsync(resolvedDate.Value, snapshotVersion, cancellationToken)
+            : [];
         var items = signals
             .Select(static item => new SignalListItemResponse(
                 item.StockCode,
                 item.StockName,
                 item.IndustryName,
                 MarketResponseMapper.FormatStrategyType(item.StrategyType),
+                MarketResponseMapper.FormatEligibilityStatus(item.EligibilityStatus),
+                MarketResponseMapper.BuildEligibilityReasons(item.EligibilityReason),
                 item.TotalScore,
                 item.ScoreBreakdown,
                 item.TriggerPrice,
@@ -523,8 +547,8 @@ public sealed class GetFinancialsUseCase(IMarketDataRepository marketRepository)
                     profile?.StockName ?? financial.StockCode,
                     profile?.IndustryName,
                     financial.ReportDate,
-                    financial.Pe,
-                    financial.Pb,
+                    financial.Pe ?? profile?.Pe,
+                    financial.Pb ?? profile?.Pb,
                     financial.Roe,
                     financial.RevenueYoy,
                     financial.NetProfitYoy,
@@ -578,7 +602,8 @@ public sealed class GetStrategyExplanationUseCase
             "a-share-20k-v1",
             [
                 new StrategyRuleSectionResponse("候选池范围", [
-                    "剔除停牌、ST、退市风险以及上市未满 365 天的股票。",
+                    "观察池默认覆盖主板和创业板；是否能进入可执行结果，由账户权限开关控制。",
+                    "剔除停牌、ST、退市风险以及上市未满 250 个交易日的股票。",
                     "要求股价站上 MA60，ATR 波动率不超过 7%，最新价格位于 5 到 80 元之间。",
                     "要求 20 日平均成交额不低于 2 亿元。"
                 ]),
@@ -586,10 +611,18 @@ public sealed class GetStrategyExplanationUseCase
                     "使用三大指数判断环境，收盘站上 MA20 且 MA20 上行为有效确认。",
                     "3 个确认为强势，2 个确认可交易，1 个确认弱机会，0 个确认不交易。"
                 ]),
+                new StrategyRuleSectionResponse("评分分层", [
+                    "80 分以下直接淘汰，不进入候选池。",
+                    "80 到 84 分只保留学习观察。",
+                    "85 到 89 分进入强观察，但不进入可执行结果。",
+                    "90 分及以上才有资格进入可执行评估。"
+                ]),
                 new StrategyRuleSectionResponse("可执行信号门槛", [
-                    "候选股总分至少达到 60 分。",
                     "策略类型必须是突破或回踩 MA20。",
-                    "市场环境不能是不交易，且风险收益比至少为 2。"
+                    "市场环境不能是不交易；弱机会市场不执行突破策略。",
+                    "股票必须在当前账户的可交易池内，否则只保留观察。",
+                    "风险收益比至少为 2。",
+                    "最近一次回测必须通过准入标准，否则系统只展示观察结果。"
                 ])
             ],
             [
@@ -623,8 +656,9 @@ public sealed class GetStrategyExplanationUseCase
             [
                 new StrategyExecutionRuleResponse("止损", "回踩策略取 max(MA20 * 0.98, close * 0.96)；突破策略取 max(close * 0.97, close * 0.96)。"),
                 new StrategyExecutionRuleResponse("目标价", "回踩策略目标价为 close * 1.10；突破策略目标价为 close * 1.12。"),
-                new StrategyExecutionRuleResponse("仓位建议", "强势环境建议投入 10000 元；可交易环境和满足条件的弱机会回踩建议投入 8000 元；股数向下取整到 100 股。"),
-                new StrategyExecutionRuleResponse("信号生成", "只有候选股可执行、市场环境允许且风险收益比达标时，才生成交易信号。")
+                new StrategyExecutionRuleResponse("仓位建议", "强势环境建议投入 10000 元；可交易环境建议投入 8000 元；弱机会环境只允许回踩策略按 8000 元以内执行；股数向下取整到 100 股。"),
+                new StrategyExecutionRuleResponse("候选降级", "不在可交易池、市场不允许、评分不足或盈亏比不足时，候选会降级为强观察、学习观察或普通观察。"),
+                new StrategyExecutionRuleResponse("信号生成", "只有候选股可执行、市场环境允许、风险收益比达标且最近一次回测通过时，才生成交易信号。")
             ]);
     }
 }
@@ -659,7 +693,7 @@ public sealed class GetBacktestOverviewUseCase(IMarketDataRepository marketRepos
 
         if (trades.Count == 0)
         {
-            return new BacktestOverviewResponse("a-share-20k-v1", 0, 0m, 0m, 0m, 0m, []);
+            return new BacktestOverviewResponse("a-share-20k-v1", 0, 0m, 0m, 0m, 0m, 0m, 0m, 0, 0m, 0, false, ["缺少回测记录"], []);
         }
 
         return new BacktestOverviewResponse(
@@ -669,6 +703,13 @@ public sealed class GetBacktestOverviewUseCase(IMarketDataRepository marketRepos
             Math.Round(trades.Average(static item => item.ReturnPct), 2, MidpointRounding.AwayFromZero),
             Math.Round(trades.Average(static item => item.MaxGainPct), 2, MidpointRounding.AwayFromZero),
             Math.Round(trades.Average(static item => item.MaxDrawdownPct), 2, MidpointRounding.AwayFromZero),
+            0m,
+            100m,
+            0,
+            0m,
+            0,
+            true,
+            [],
             trades.OrderByDescending(static item => item.TradeDate).ThenBy(static item => item.StockCode).ToList());
     }
 
@@ -1020,6 +1061,8 @@ public sealed class GetStockDetailUseCase(
                 MarketResponseMapper.FormatCandidateGrade(candidate.Grade),
                 MarketResponseMapper.FormatStrategyType(candidate.StrategyType),
                 candidate.IsTradable,
+                MarketResponseMapper.FormatEligibilityStatus(candidate.EligibilityStatus),
+                MarketResponseMapper.BuildEligibilityReasons(candidate.EligibilityReason),
                 candidate.TotalScore,
                 scoreBreakdown,
                 candidate.Close,
@@ -1042,10 +1085,12 @@ public sealed class GetStockDetailUseCase(
             snapshotVersion.ToValue(),
             snapshotVersion.ToDisplayName(),
             new PriceSeriesResponse(latestBar.TradeDate, latestBar.Open, latestBar.High, latestBar.Low, latestBar.Close, latestBar.Volume, latestBar.Amount, indicator?.Ma20, indicator?.Ma60, indicator?.Ma120),
-            financial is null ? null : new FinancialSummaryResponse(financial.ReportDate, financial.Pe, financial.Pb, financial.Roe, financial.RevenueYoy, financial.NetProfitYoy),
+            financial is null
+                ? null
+                : new FinancialSummaryResponse(financial.ReportDate, financial.Pe ?? profile.Pe, financial.Pb ?? profile.Pb, financial.Roe, financial.RevenueYoy, financial.NetProfitYoy),
             indicator is null ? null : new IndicatorSummaryResponse(indicator.Close, indicator.Ma20, indicator.Ma60, indicator.Ma120, indicator.Atr14, indicator.Return20d, indicator.Return60d, indicator.RelativeStrengthScore, indicator.Is20DayBreakout, indicator.IsMa20Upward, indicator.IsBullishStacked, indicator.DistanceToMa20Pct),
             candidateResponse,
-            signal is null ? null : new SignalListItemResponse(signal.StockCode, signal.StockName, signal.IndustryName, MarketResponseMapper.FormatStrategyType(signal.StrategyType), signal.TotalScore, signal.ScoreBreakdown, signal.TriggerPrice, signal.StopLossPrice, signal.TargetPrice, signal.RiskRewardRatio, signal.SuggestedCapital, signal.EstimatedShares, signal.Explanation, signal.GeneratedAtUtc),
+            signal is null ? null : new SignalListItemResponse(signal.StockCode, signal.StockName, signal.IndustryName, MarketResponseMapper.FormatStrategyType(signal.StrategyType), MarketResponseMapper.FormatEligibilityStatus(signal.EligibilityStatus), MarketResponseMapper.BuildEligibilityReasons(signal.EligibilityReason), signal.TotalScore, signal.ScoreBreakdown, signal.TriggerPrice, signal.StopLossPrice, signal.TargetPrice, signal.RiskRewardRatio, signal.SuggestedCapital, signal.EstimatedShares, signal.Explanation, signal.GeneratedAtUtc),
             latestBarHistory
                 .OrderBy(static item => item.TradeDate)
                 .Select(item => new PriceSeriesResponse(item.TradeDate, item.Open, item.High, item.Low, item.Close, item.Volume, item.Amount, item.TradeDate == resolvedDate.Value ? indicator?.Ma20 : null, item.TradeDate == resolvedDate.Value ? indicator?.Ma60 : null, item.TradeDate == resolvedDate.Value ? indicator?.Ma120 : null))
@@ -1157,6 +1202,23 @@ internal static class MarketResponseMapper
             StrategyType.WatchPullback => "观察回踩",
             _ => strategyType.ToString()
         };
+    }
+
+    internal static string FormatEligibilityStatus(string status)
+    {
+        return status switch
+        {
+            "tradable" => "可执行",
+            "strong_watch" => "强观察",
+            "study_only" => "学习观察",
+            "observe_only" => "观察",
+            _ => string.IsNullOrWhiteSpace(status) ? "观察" : status
+        };
+    }
+
+    internal static IReadOnlyList<string> BuildEligibilityReasons(string? reason)
+    {
+        return string.IsNullOrWhiteSpace(reason) ? [] : [reason];
     }
 
     internal static IReadOnlyList<ScoreRuleDetailResponse> BuildScoreRuleDetails(CandidateScoreBreakdown breakdown)

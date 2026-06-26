@@ -52,6 +52,52 @@ def test_normalize_stock_snapshot_maps_core_fields() -> None:
     assert row["raw_payload"]["代码"] == "600000"
 
 
+def test_normalize_stock_snapshot_maps_pe_pb() -> None:
+    audit = AuditContext.create(
+        source_name="akshare",
+        interface_name="stock_zh_a_spot",
+        symbol="all",
+        batch_id="b1-valuations",
+        is_incremental=True,
+    )
+
+    row = normalize_stock_snapshot(
+        {
+            "代码": "600000",
+            "名称": "浦发银行",
+            "市盈率TTM": "6.82",
+            "市净率": "0.58",
+        },
+        audit,
+    )
+
+    assert row["pe"] == Decimal("6.82")
+    assert row["pb"] == Decimal("0.58")
+
+
+def test_normalize_stock_snapshot_maps_dynamic_pe_alias() -> None:
+    audit = AuditContext.create(
+        source_name="akshare",
+        interface_name="stock_zh_a_spot_em",
+        symbol="all",
+        batch_id="b1-dynamic-pe",
+        is_incremental=True,
+    )
+
+    row = normalize_stock_snapshot(
+        {
+            "代码": "600000",
+            "名称": "浦发银行",
+            "市盈率-动态": "6.82",
+            "市净率": "0.58",
+        },
+        audit,
+    )
+
+    assert row["pe"] == Decimal("6.82")
+    assert row["pb"] == Decimal("0.58")
+
+
 def test_normalize_daily_bar_counts_missing_required_fields() -> None:
     audit = AuditContext.create(
         source_name="akshare",
@@ -138,6 +184,26 @@ def test_normalize_financial_snapshot_maps_report_date() -> None:
 
     assert row["report_date"] == date(2025, 12, 31)
     assert row["roe"] == Decimal("12.5")
+
+
+def test_normalize_financial_snapshot_maps_pe_pb_aliases() -> None:
+    audit = AuditContext.create(
+        source_name="akshare",
+        interface_name="stock_financial_abstract_ths_fallback_sina",
+        symbol="600000",
+        batch_id="b4-pepb",
+        is_incremental=True,
+    )
+
+    row = normalize_financial_snapshot(
+        {"report_date": "2025-12-31", "市盈率TTM": "18.6", "市净率": "2.08"},
+        audit,
+        stock_code="600000",
+    )
+
+    assert row["report_date"] == date(2025, 12, 31)
+    assert row["pe"] == Decimal("18.6")
+    assert row["pb"] == Decimal("2.08")
 
 
 def test_normalize_industry_stat_maps_rank() -> None:

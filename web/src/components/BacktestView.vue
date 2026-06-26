@@ -77,6 +77,12 @@ function formatExitLabel(hitStopLoss: boolean, hitTarget: boolean) {
         </button>
       </div>
       <p class="workspace-copy">当前回测快照版本：{{ snapshotVersion }}。建议先验证近一段区间，再逐步拉长时间范围。</p>
+      <p v-if="selectedRun" class="workspace-copy">
+        当前准入状态：{{ selectedRun.isApproved ? '已通过' : '未通过' }}
+        <template v-if="!selectedRun.isApproved && selectedRun.failureReasons.length">
+          。原因：{{ selectedRun.failureReasons.join('；') }}
+        </template>
+      </p>
     </article>
 
     <article class="panel-card">
@@ -98,6 +104,8 @@ function formatExitLabel(hitStopLoss: boolean, hitTarget: boolean) {
               <th>盈亏比</th>
               <th>最大回撤</th>
               <th>总收益</th>
+              <th>基准收益</th>
+              <th>准入</th>
               <th>生成时间</th>
             </tr>
           </thead>
@@ -115,6 +123,8 @@ function formatExitLabel(hitStopLoss: boolean, hitTarget: boolean) {
               <td>{{ formatNumber(run.profitLossRatio) }}</td>
               <td>{{ formatPercent(run.maxDrawdownPct) }}</td>
               <td>{{ formatPercent(run.totalReturnPct) }}</td>
+              <td>{{ formatPercent(run.benchmarkReturnPct) }}</td>
+              <td>{{ run.isApproved ? '通过' : '未通过' }}</td>
               <td>{{ formatDateTime(run.createdAtUtc) }}</td>
             </tr>
           </tbody>
@@ -141,7 +151,13 @@ function formatExitLabel(hitStopLoss: boolean, hitTarget: boolean) {
         <div><span>平均最大回撤</span><strong>{{ formatPercent(selectedRun.averageMaxDrawdownPct) }}</strong></div>
         <div><span>盈亏比</span><strong>{{ formatNumber(selectedRun.profitLossRatio) }}</strong></div>
         <div><span>总收益</span><strong>{{ formatPercent(selectedRun.totalReturnPct) }}</strong></div>
+        <div><span>基准收益</span><strong>{{ formatPercent(selectedRun.benchmarkReturnPct) }}</strong></div>
         <div><span>最大回撤</span><strong>{{ formatPercent(selectedRun.maxDrawdownPct) }}</strong></div>
+        <div><span>数据覆盖率</span><strong>{{ formatPercent(selectedRun.dataCoveragePct) }}</strong></div>
+        <div><span>跳过交易日</span><strong>{{ selectedRun.skippedTradeDays }}</strong></div>
+        <div><span>年化交易次数</span><strong>{{ formatNumber(selectedRun.annualTradeCount) }}</strong></div>
+        <div><span>连续亏损上限</span><strong>{{ selectedRun.maxConsecutiveLosses }}</strong></div>
+        <div><span>准入状态</span><strong>{{ selectedRun.isApproved ? '已通过' : '未通过' }}</strong></div>
         <div><span>平均持有天数</span><strong>{{ formatNumber(selectedRun.averageHoldingDays) }}</strong></div>
         <div><span>生成时间</span><strong>{{ formatDateTime(selectedRun.createdAtUtc) }}</strong></div>
       </div>

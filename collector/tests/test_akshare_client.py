@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import builtins
+from unittest.mock import Mock
 
 import pytest
 
+import stock_collector.akshare_client as akshare_client_module
 from stock_collector.akshare_client import AkshareClient
 from stock_collector.akshare_client import AkshareClientError
 
@@ -52,8 +54,16 @@ class SpotProvider:
         return [{"代码": "600000"}]
 
 
-class SpotProviderWithMetadata:
+class SpotEmFallbackProvider:
+    def stock_zh_a_spot_em(self):
+        raise RuntimeError("em unavailable")
+
     def stock_zh_a_spot(self):
+        return [{"代码": "600000"}]
+
+
+class SpotProviderWithMetadata:
+    def stock_zh_a_spot_em(self):
         return [{"代码": "600000", "名称": "浦发银行"}]
 
     def stock_info_sz_name_code(self, symbol: str):
@@ -70,7 +80,7 @@ class SpotProviderWithMetadata:
 
 
 class SpotProviderWithIndustryBoardMembers:
-    def stock_zh_a_spot(self):
+    def stock_zh_a_spot_em(self):
         return [{"代码": "605020", "名称": "永和股份"}]
 
     def stock_info_sz_name_code(self, symbol: str):
@@ -113,6 +123,18 @@ class FinancialFallbackProvider:
         assert stock == "bj920000"
         assert symbol == "资产负债表"
         return [{"报告日": "20260331"}]
+
+
+class FinancialThsProvider:
+    def stock_financial_abstract_ths(self, symbol: str, indicator: str):
+        assert symbol == "600000"
+        assert indicator == "按报告期"
+        return [{
+            "报告期": "2025-12-31",
+            "市盈率TTM": "15.2",
+            "市净率": "1.43",
+            "净资产收益率": "12.5",
+        }]
 
 
 def test_health_reports_ready_when_provider_is_injected() -> None:
@@ -162,12 +184,84 @@ def test_to_records_supports_dataframe_like_payload() -> None:
     assert rows == [{"symbol": "600000"}]
 
 
-def test_fetch_stock_spot_snapshot_uses_non_em_interface() -> None:
+def test_fetch_stock_spot_snapshot_falls_back_to_non_em_interface() -> None:
     client = AkshareClient(provider=SpotProvider())
 
     rows = client.fetch_stock_spot_snapshot()
 
     assert rows == [{"代码": "600000"}]
+
+
+def test_fetch_stock_spot_snapshot_falls_back_when_em_request_fails() -> None:
+    client = AkshareClient(provider=SpotEmFallbackProvider())
+
+    rows = client.fetch_stock_spot_snapshot()
+
+    assert rows == [{"代码": "600000"}]
+
+
+def test_fetch_stock_spot_snapshot_prefers_direct_eastmoney_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = [
+        {
+            "data": {
+                "total": 2,
+                "diff": [{"f12": "600000", "f14": "浦发银行", "f9": 6.82, "f23": 0.58}],
+            }
+        },
+        {
+            "data": {
+                "total": 2,
+                "diff": [{"f12": "000001", "f14": "平安银行", "f9": 5.11, "f23": 0.61}],
+            }
+        },
+    ]
+
+    def fake_get(url: str, params: dict[str, str], timeout: int):  # type: ignore[no-untyped-def]
+        payload = responses.pop(0)
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+        return response
+
+    monkeypatch.setattr(akshare_client_module.requests, "get", fake_get)
+    client = AkshareClient(provider=None)
+
+    rows = client._fetch_eastmoney_stock_spot_snapshot()  # noqa: SLF001
+
+    assert rows[0]["代码"] == "600000"
+    assert rows[0]["市盈率-动态"] == 6.82
+    assert rows[1]["代码"] == "000001"
+    assert rows[1]["市净率"] == 0.61
+
+
+def test_fetch_stock_spot_snapshot_prefers_direct_tencent_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = [
+        {
+            "data": {
+                "rank_list": [
+                    {"code": "sh600000", "name": "娴﹀彂閾惰", "pe_ttm": "5.78", "pn": "0.39", "hsl": "0.10", "zxj": "8.73"},
+                ]
+            }
+        },
+        {"data": {"rank_list": []}},
+    ]
+
+    def fake_get(url: str, params: dict[str, str], timeout: int):  # type: ignore[no-untyped-def]
+        payload = responses.pop(0)
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+        return response
+
+    monkeypatch.setattr(akshare_client_module.requests, "get", fake_get)
+    client = AkshareClient(provider=None)
+
+    rows = client._fetch_tencent_stock_spot_snapshot()  # noqa: SLF001
+
+    assert rows[0]["code"] == "sh600000"
+    assert rows[0]["pe_ttm"] == "5.78"
+    assert rows[0]["pn"] == "0.39"
+    assert rows[0]["hsl"] == "0.10"
 
 
 def test_fetch_stock_spot_snapshot_enriches_industry_from_exchange_lists() -> None:
@@ -220,6 +314,27 @@ def test_fetch_financial_snapshots_falls_back_to_sina() -> None:
     rows = client.fetch_financial_snapshots("920000")
 
     assert rows == [{"report_date": "20260331", "报告日": "20260331", "operating_cash_flow": None}]
+
+
+def test_fetch_financial_snapshots_maps_pe_pb_from_ths_payload() -> None:
+    client = AkshareClient(provider=FinancialThsProvider())
+
+    rows = client.fetch_financial_snapshots("600000")
+
+    assert rows == [{
+        "report_date": "2025-12-31",
+        "roe": "12.5",
+        "revenue_yoy": None,
+        "net_profit_yoy": None,
+        "operating_cash_flow": None,
+        "pe": "15.2",
+        "pb": "1.43",
+        "free_float_market_cap": None,
+        "报告期": "2025-12-31",
+        "市盈率TTM": "15.2",
+        "市净率": "1.43",
+        "净资产收益率": "12.5",
+    }]
 
 
 def test_to_records_rejects_unsupported_payload() -> None:

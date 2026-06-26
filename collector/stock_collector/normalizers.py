@@ -155,6 +155,9 @@ def normalize_stock_snapshot(raw: dict[str, Any], audit: AuditContext) -> dict[s
         "is_st": _detect_st(stock_name, raw),
         "is_delisting_risk": _detect_delisting_risk(stock_name, raw),
         "is_active": True,
+        "pe": parse_decimal(_first_present(raw, "\u5e02\u76c8\u7387", "\u5e02\u76c8\u7387-\u52a8\u6001", "\u5e02\u76c8\u7387TTM", "\u5e02\u76c8\u7387(TTM)", "甯傜泩鐜?", "pe")),
+        "pb": parse_decimal(_first_present(raw, "\u5e02\u51c0\u7387", "甯傚噣鐜?", "pb")),
+        "turnover_rate": parse_decimal(_first_present(raw, "\u6362\u624b\u7387", "鎹㈡墜鐜?", "turnover_rate")),
         **build_audit_columns(raw, audit),
     }
     return normalized
@@ -221,7 +224,7 @@ def normalize_financial_snapshot(
     normalized = {
         "stock_code": stock_code,
         "report_date": report_date,
-        "pe": parse_decimal(_first_present(raw, "\u5e02\u76c8\u7387", "甯傜泩鐜?", "pe")),
+        "pe": parse_decimal(_first_present(raw, "\u5e02\u76c8\u7387", "\u5e02\u76c8\u7387TTM", "\u5e02\u76c8\u7387(TTM)", "甯傜泩鐜?", "pe")),
         "pb": parse_decimal(_first_present(raw, "\u5e02\u51c0\u7387", "甯傚噣鐜?", "pb")),
         "roe": parse_decimal(_first_present(raw, "\u51c0\u8d44\u4ea7\u6536\u76ca\u7387", "鍑€璧勪骇鏀剁泭鐜?", "roe")),
         "revenue_yoy": parse_decimal(_first_present(raw, "\u8425\u4e1a\u6536\u5165\u540c\u6bd4\u589e\u957f", "钀ヤ笟鏀跺叆鍚屾瘮澧為暱", "revenue_yoy")),
@@ -373,4 +376,3 @@ def _infer_market(stock_code: str) -> str:
     if stock_code.startswith(("430", "830", "831", "832", "833", "835", "836", "837", "838", "920")):
         return "BJ"
     return "UNKNOWN"
-

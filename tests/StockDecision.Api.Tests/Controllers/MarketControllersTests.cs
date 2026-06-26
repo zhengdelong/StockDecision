@@ -21,7 +21,7 @@ public class MarketControllersTests
     public async Task DashboardController_Should_Return_Dashboard_Summary()
     {
         var fixture = CreateFixture();
-        var controller = new DashboardController(new GetDashboardUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository, fixture.IngestionLogRepository));
+        var controller = new DashboardController(new GetDashboardUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository, fixture.IngestionLogRepository, fixture.BacktestRunRepository));
 
         var result = await controller.Get(null, CancellationToken.None);
 
@@ -50,6 +50,7 @@ public class MarketControllersTests
         Assert.Equal("600001", candidate.StockCode);
         Assert.Equal("Alpha Tech", candidate.StockName);
         Assert.True(candidate.IsTradable);
+        Assert.Equal("可执行", candidate.EligibilityStatus);
     }
 
     /// <summary>
@@ -59,7 +60,7 @@ public class MarketControllersTests
     public async Task SignalsController_Should_Return_Today_Signals()
     {
         var fixture = CreateFixture();
-        var controller = new SignalsController(new GetTodaySignalsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository));
+        var controller = new SignalsController(new GetTodaySignalsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository, fixture.BacktestRunRepository));
 
         var result = await controller.GetToday(CancellationToken.None);
 
@@ -77,7 +78,7 @@ public class MarketControllersTests
     public async Task SignalsController_Should_Return_Signals_For_Date()
     {
         var fixture = CreateFixture();
-        var controller = new SignalsController(new GetTodaySignalsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository));
+        var controller = new SignalsController(new GetTodaySignalsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository, fixture.BacktestRunRepository));
 
         var result = await controller.Get(new SignalListQuery { Date = TradeDate }, CancellationToken.None);
 
@@ -237,7 +238,13 @@ public class MarketControllersTests
                 MarketContext = "大盘和行业同步转强，允许执行趋势策略。",
                 ExecutionDiscipline = "按系统仓位和止损规则执行。",
                 ResultSummary = "两天后达到止盈目标，整体符合预期。",
-                ImprovementPlan = "下次可以把买点再靠近回踩确认位。"
+                ImprovementPlan = "下次可以把买点再靠近回踩确认位。",
+                ErrorTags = ["过早止盈"],
+                IsStrategyAligned = true,
+                FollowedStopLoss = true,
+                FollowedTakeProfit = false,
+                ModifiedPlanDuringTrade = false,
+                FollowedGapRule = true
             },
             CancellationToken.None);
 
@@ -252,6 +259,7 @@ public class MarketControllersTests
         var overview = Assert.IsType<LearningReviewOverviewResponse>(listOk.Value);
         Assert.Equal("600001", overview.StockCode);
         Assert.NotEmpty(overview.ReviewPrompts);
+        Assert.Equal(1, overview.ProgressSummary.ReviewCount);
         var review = Assert.Single(overview.Reviews);
         Assert.Equal(savedReview.Id, review.Id);
         Assert.Equal("两天后达到止盈目标，整体符合预期。", review.ResultSummary);
@@ -342,6 +350,8 @@ public class MarketControllersTests
             CandidateGrade.A,
             StrategyType.Breakout,
             true,
+            "tradable",
+            "满足当前执行条件。",
             91m,
             scoreBreakdown,
             25.36m,
@@ -363,6 +373,8 @@ public class MarketControllersTests
             "Alpha Tech",
             "Software",
             StrategyType.Breakout,
+            "tradable",
+            "满足当前执行条件。",
             91m,
             scoreBreakdown,
             25.36m,
@@ -383,7 +395,7 @@ public class MarketControllersTests
             marketRepository,
             ingestionLogRepository,
             domainSyncRunRepository,
-            new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, ingestionLogRepository),
+            new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, ingestionLogRepository, new TradingPermissionsOptions()),
             new InMemorySimulatedTradingRepository(),
             new InMemoryBacktestRunRepository(),
             new InMemoryLearningReviewRepository());
@@ -613,6 +625,13 @@ public class MarketControllersTests
                 0m,
                 2m,
                 12m,
+                3m,
+                100m,
+                0,
+                24m,
+                0,
+                true,
+                [],
                 5m,
                 DateTime.UtcNow.AddMinutes(-5),
                 [new BacktestEquityPointResponse(TradeDate, 112m, 12m)],
@@ -637,6 +656,13 @@ public class MarketControllersTests
                 draft.ProfitLossRatio,
                 draft.MaxDrawdownPct,
                 draft.TotalReturnPct,
+                draft.BenchmarkReturnPct,
+                draft.DataCoveragePct,
+                draft.SkippedTradeDays,
+                draft.AnnualTradeCount,
+                draft.MaxConsecutiveLosses,
+                draft.IsApproved,
+                string.IsNullOrWhiteSpace(draft.FailureReasons) ? [] : draft.FailureReasons.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 draft.AverageHoldingDays,
                 draft.CreatedAtUtc,
                 draft.EquityCurve,
@@ -661,6 +687,12 @@ public class MarketControllersTests
                         item.ProfitLossRatio,
                         item.MaxDrawdownPct,
                         item.TotalReturnPct,
+                        item.BenchmarkReturnPct,
+                        item.DataCoveragePct,
+                        item.SkippedTradeDays,
+                        item.AnnualTradeCount,
+                        item.MaxConsecutiveLosses,
+                        item.IsApproved,
                         item.CreatedAtUtc))
                     .ToList());
         }
@@ -723,6 +755,12 @@ public class MarketControllersTests
                     draft.ExecutionDiscipline,
                     draft.ResultSummary,
                     draft.ImprovementPlan,
+                    draft.ErrorTags,
+                    draft.IsStrategyAligned,
+                    draft.FollowedStopLoss,
+                    draft.FollowedTakeProfit,
+                    draft.ModifiedPlanDuringTrade,
+                    draft.FollowedGapRule,
                     existing.CreatedAtUtc,
                     timestamp);
 
@@ -742,6 +780,12 @@ public class MarketControllersTests
                 draft.ExecutionDiscipline,
                 draft.ResultSummary,
                 draft.ImprovementPlan,
+                draft.ErrorTags,
+                draft.IsStrategyAligned,
+                draft.FollowedStopLoss,
+                draft.FollowedTakeProfit,
+                draft.ModifiedPlanDuringTrade,
+                draft.FollowedGapRule,
                 timestamp,
                 timestamp);
 

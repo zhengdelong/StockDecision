@@ -22,7 +22,7 @@ public class DomainSyncUseCasesTests
         var marketRepository = new FakeMarketDataRepository(
             importedTradeDate: new DateOnly(2026, 6, 23),
             importedFinancialReportDate: new DateOnly(2025, 12, 31));
-        var useCase = new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, new StubIngestionLogRepository());
+        var useCase = new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, new StubIngestionLogRepository(), new TradingPermissionsOptions());
 
         var tradeDate = await useCase.ExecuteAsync(cancellationToken: CancellationToken.None);
 
@@ -44,7 +44,7 @@ public class DomainSyncUseCasesTests
             importedTradeDate: new DateOnly(2026, 6, 23),
             importedFinancialReportDate: new DateOnly(2026, 3, 31));
         var runRepository = new FakeDomainSyncRunRepository();
-        var ensureUseCase = new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, new StubIngestionLogRepository());
+        var ensureUseCase = new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, new StubIngestionLogRepository(), new TradingPermissionsOptions());
         var runUseCase = new RunDomainSyncUseCase(ensureUseCase, marketRepository, runRepository);
 
         var result = await runUseCase.ExecuteAsync("poll", cancellationToken: CancellationToken.None);

@@ -36,15 +36,15 @@ const emit = defineEmits<{
  * 根据候选股总分给出更直观的强弱文案。
  */
 function resolveScoreLabel(item: CandidateItem): string {
-  if (item.totalScore >= 75) {
+  if (item.totalScore >= 90) {
     return '高优先级'
   }
 
-  if (item.totalScore >= 68) {
-    return '继续跟踪'
+  if (item.totalScore >= 85) {
+    return '强观察'
   }
 
-  return '一般观察'
+  return '学习观察'
 }
 
 /**
@@ -194,9 +194,9 @@ function resolvePlanPercentages(item: CandidateItem): { riskPct: number | null; 
             <td>
               <div class="candidate-status-cell">
                 <span :class="['pill', item.isTradable ? 'positive' : 'neutral']">
-                  {{ item.isTradable ? '可执行' : '观察' }}
+                  {{ item.eligibilityStatus }}
                 </span>
-                <small>{{ item.isTradable ? '满足当前执行条件' : '先放入观察名单' }}</small>
+                <small>{{ item.eligibilityReasons[0] ?? (item.isTradable ? '满足当前执行条件' : '先放入观察名单') }}</small>
               </div>
             </td>
           </tr>

@@ -350,6 +350,8 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         var accountCapital = InitialAccountCapital;
         var peakAccountCapital = InitialAccountCapital;
         var maxDrawdownPct = 0m;
+        var skippedTradeDays = 0;
+        var executedTradeDates = new HashSet<DateOnly>();
 
         // 回测直接按用户选择的区间扫描已有信号，不再额外跳过前 120 个交易日。
         // 技术指标和候选/信号本身已经在快照阶段算好，这里只负责按区间回放交易结果。
@@ -361,16 +363,19 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                 var forwardBars = await marketRepository.GetForwardDailyBarsAsync(signal.StockCode, tradeDate, Math.Clamp(request.MaxHoldingDays, 1, 20), cancellationToken);
                 if (forwardBars.Count == 0)
                 {
+                    skippedTradeDays++;
                     continue;
                 }
 
                 var simulation = SimulateTrade(signal, forwardBars, accountCapital);
                 if (simulation is null)
                 {
+                    skippedTradeDays++;
                     continue;
                 }
 
                 trades.Add(simulation.Trade);
+                executedTradeDates.Add(tradeDate);
                 accountCapital = Math.Round(accountCapital + simulation.ProfitAmount, 2, MidpointRounding.AwayFromZero);
                 peakAccountCapital = Math.Max(peakAccountCapital, accountCapital);
                 var currentDrawdownPct = peakAccountCapital == 0m ? 0m : (accountCapital - peakAccountCapital) / peakAccountCapital * 100m;
@@ -390,7 +395,20 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         var averageHoldingDays = trades.Count == 0
             ? 0m
             : Math.Round(trades.Average(static item => (decimal)item.MaxHoldingDays), 2, MidpointRounding.AwayFromZero);
-        var detail = BuildBacktestDetail(0, request.StartDate, request.EndDate, snapshotVersion, trades, equityCurve, maxDrawdownPct, averageHoldingDays, DateTime.UtcNow);
+        var benchmarkReturnPct = await CalculateBenchmarkReturnPctAsync(request.StartDate, request.EndDate, cancellationToken);
+        var detail = BuildBacktestDetail(
+            0,
+            request.StartDate,
+            request.EndDate,
+            snapshotVersion,
+            trades,
+            equityCurve,
+            maxDrawdownPct,
+            averageHoldingDays,
+            benchmarkReturnPct,
+            skippedTradeDays,
+            tradeDates.Count,
+            DateTime.UtcNow);
         var runId = await backtestRunRepository.AddRunAsync(
             new BacktestRunDraft(
                 StrategyVersion,
@@ -405,6 +423,13 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                 detail.ProfitLossRatio,
                 detail.MaxDrawdownPct,
                 detail.TotalReturnPct,
+                detail.BenchmarkReturnPct,
+                detail.DataCoveragePct,
+                detail.SkippedTradeDays,
+                detail.AnnualTradeCount,
+                detail.MaxConsecutiveLosses,
+                detail.IsApproved,
+                string.Join("|", detail.FailureReasons),
                 detail.AverageHoldingDays,
                 detail.CreatedAtUtc,
                 detail.EquityCurve,
@@ -422,7 +447,7 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         var latest = await backtestRunRepository.GetLatestRunAsync(cancellationToken);
         if (latest is null)
         {
-            return new BacktestOverviewResponse(StrategyVersion, 0, 0m, 0m, 0m, 0m, []);
+            return new BacktestOverviewResponse(StrategyVersion, 0, 0m, 0m, 0m, 0m, 0m, 0m, 0, 0m, 0, false, ["缺少回测记录"], []);
         }
 
         return new BacktestOverviewResponse(
@@ -432,6 +457,13 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
             latest.AverageReturnPct,
             latest.AverageMaxGainPct,
             latest.AverageMaxDrawdownPct,
+            latest.BenchmarkReturnPct,
+            latest.DataCoveragePct,
+            latest.SkippedTradeDays,
+            latest.AnnualTradeCount,
+            latest.MaxConsecutiveLosses,
+            latest.IsApproved,
+            latest.FailureReasons,
             latest.Trades);
     }
 
@@ -444,6 +476,9 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         IReadOnlyList<BacktestEquityPointResponse> equityCurve,
         decimal maxDrawdownPct,
         decimal averageHoldingDays,
+        decimal benchmarkReturnPct,
+        int skippedTradeDays,
+        int totalTradeDays,
         DateTime createdAtUtc)
     {
         if (trades.Count == 0)
@@ -462,6 +497,13 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                 0m,
                 0m,
                 0m,
+                0m,
+                0m,
+                skippedTradeDays,
+                0m,
+                0,
+                false,
+                ["缺少可回放交易样本"],
                 averageHoldingDays,
                 createdAtUtc,
                 [],
@@ -473,6 +515,20 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         var averageWin = wins.Count == 0 ? 0m : wins.Average(static item => item.ReturnPct);
         var averageLoss = losses.Count == 0 ? 0m : Math.Abs(losses.Average(static item => item.ReturnPct));
         var ratio = averageLoss == 0m ? 0m : averageWin / averageLoss;
+        var totalReturnPct = Math.Round(equityCurve.LastOrDefault()?.ReturnPct ?? 0m, 2, MidpointRounding.AwayFromZero);
+        var annualTradeCount = CalculateAnnualTradeCount(startDate, endDate, trades.Count);
+        var dataCoveragePct = totalTradeDays <= 0
+            ? 0m
+            : Math.Round((totalTradeDays - skippedTradeDays) * 100m / totalTradeDays, 2, MidpointRounding.AwayFromZero);
+        var maxConsecutiveLosses = CalculateMaxConsecutiveLosses(trades);
+        var failureReasons = BuildFailureReasons(
+            totalReturnPct,
+            benchmarkReturnPct,
+            ratio,
+            wins.Count * 100m / trades.Count,
+            Math.Abs(maxDrawdownPct),
+            annualTradeCount);
+        var isApproved = failureReasons.Count == 0;
 
         return new BacktestRunDetailResponse(
             id,
@@ -487,11 +543,111 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
             Math.Round(trades.Average(static item => item.MaxDrawdownPct), 2, MidpointRounding.AwayFromZero),
             Math.Round(ratio, 2, MidpointRounding.AwayFromZero),
             Math.Round(Math.Abs(maxDrawdownPct), 2, MidpointRounding.AwayFromZero),
-            Math.Round(equityCurve.LastOrDefault()?.ReturnPct ?? 0m, 2, MidpointRounding.AwayFromZero),
+            totalReturnPct,
+            benchmarkReturnPct,
+            dataCoveragePct,
+            skippedTradeDays,
+            annualTradeCount,
+            maxConsecutiveLosses,
+            isApproved,
+            failureReasons,
             averageHoldingDays,
             createdAtUtc,
             equityCurve,
             trades.OrderByDescending(static item => item.TradeDate).ThenBy(static item => item.StockCode).ToList());
+    }
+
+    private async Task<decimal> CalculateBenchmarkReturnPctAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken)
+    {
+        var history = await marketRepository.GetIndexBarHistoryAsync(endDate, 2_000, cancellationToken);
+        var benchmarkCandidates = history
+            .Where(item => item.TradeDate >= startDate && item.TradeDate <= endDate && (item.IndexCode == "000300" || item.IndexCode == "000905"))
+            .GroupBy(item => item.IndexCode)
+            .Select(group =>
+            {
+                var ordered = group.OrderBy(item => item.TradeDate).ToList();
+                if (ordered.Count < 2 || ordered[0].Close == 0m)
+                {
+                    return (decimal?)null;
+                }
+
+                return Math.Round((ordered[^1].Close - ordered[0].Close) / ordered[0].Close * 100m, 2, MidpointRounding.AwayFromZero);
+            })
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .ToList();
+
+        return benchmarkCandidates.Count == 0 ? 0m : benchmarkCandidates.Max();
+    }
+
+    private static decimal CalculateAnnualTradeCount(DateOnly startDate, DateOnly endDate, int tradeCount)
+    {
+        var daySpan = Math.Max(1, endDate.DayNumber - startDate.DayNumber + 1);
+        var years = daySpan / 365m;
+        return Math.Round(tradeCount / years, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static int CalculateMaxConsecutiveLosses(IReadOnlyList<BacktestTradeItemResponse> trades)
+    {
+        var ordered = trades.OrderBy(item => item.TradeDate).ThenBy(item => item.StockCode).ToList();
+        var current = 0;
+        var max = 0;
+        foreach (var trade in ordered)
+        {
+            if (trade.ReturnPct < 0m)
+            {
+                current++;
+                max = Math.Max(max, current);
+            }
+            else
+            {
+                current = 0;
+            }
+        }
+
+        return max;
+    }
+
+    private static IReadOnlyList<string> BuildFailureReasons(
+        decimal totalReturnPct,
+        decimal benchmarkReturnPct,
+        decimal profitLossRatio,
+        decimal winRatePct,
+        decimal maxDrawdownPct,
+        decimal annualTradeCount)
+    {
+        var reasons = new List<string>();
+        if (totalReturnPct <= 0m)
+        {
+            reasons.Add("扣成本后总收益未转正");
+        }
+
+        if (benchmarkReturnPct > 0m && totalReturnPct <= benchmarkReturnPct)
+        {
+            reasons.Add("未跑赢可用基准指数");
+        }
+
+        if (profitLossRatio < 2m)
+        {
+            reasons.Add("盈亏比低于 2");
+        }
+
+        if (winRatePct < 40m)
+        {
+            reasons.Add("胜率低于 40%");
+        }
+
+        if (maxDrawdownPct > 20m)
+        {
+            reasons.Add("最大回撤超过 20%");
+        }
+
+        if (annualTradeCount < 12m || annualTradeCount > 50m)
+        {
+            reasons.Add("年化交易次数不在 12 到 50 次之间");
+        }
+
+        return reasons;
     }
 
     /// <summary>

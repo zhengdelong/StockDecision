@@ -123,8 +123,9 @@ public static class MarketRegimePolicy
 /// </summary>
 public static class CandidatePolicy
 {
-    private const decimal CandidatePoolMinimumScore = 60m;
-    private const decimal TradableMinimumScore = 60m;
+    private const decimal CandidatePoolMinimumScore = 80m;
+    private const decimal StrongWatchMinimumScore = 85m;
+    private const decimal TradableMinimumScore = 90m;
 
     /// <summary>
     /// 基于当前画像、指标和财务快照重建评分拆解，供接口按最新规则解释得分过程。
@@ -147,15 +148,22 @@ public static class CandidatePolicy
         IndicatorSnapshot indicator,
         FinancialSnapshot? financial,
         IndustryDailyStat? industry,
-        MarketRegimeSnapshot regime)
+        MarketRegimeSnapshot regime,
+        bool isInTradablePool,
+        bool isInWatchPool)
     {
+        if (!isInWatchPool)
+        {
+            return null;
+        }
+
         if (!profile.IsActive || profile.IsSt || profile.IsDelistingRisk)
         {
             return null;
         }
 
         // 新股历史样本不足且波动特征不稳定，直接排除。
-        if (profile.ListDate is DateOnly listDate && listDate > tradeDate.AddDays(-365))
+        if (profile.ListDate is DateOnly listDate && listDate > tradeDate.AddDays(-250))
         {
             return null;
         }
@@ -190,14 +198,11 @@ public static class CandidatePolicy
         }
 
         var strategyType = ResolveStrategyType(indicator, regime);
-        var isTradable = totalScore >= TradableMinimumScore &&
-            strategyType is StrategyType.Breakout or StrategyType.PullbackToMa20 &&
-            regime.Regime != MarketSignalEligibility.NoTrade;
-
         var stopLoss = ResolveStopLoss(indicator.Close, indicator.Ma20, strategyType);
         var targetPrice = ResolveTargetPrice(indicator.Close, strategyType);
         var riskReward = CalculateRiskReward(indicator.Close, stopLoss, targetPrice);
         var grade = ResolveGrade(totalScore);
+        var eligibility = ResolveEligibility(totalScore, strategyType, regime, isInTradablePool, riskReward);
 
         return new CandidateStock(
             tradeDate,
@@ -206,7 +211,9 @@ public static class CandidatePolicy
             profile.IndustryName,
             grade,
             strategyType,
-            isTradable,
+            eligibility.IsTradable,
+            eligibility.Status,
+            eligibility.Reason,
             totalScore,
             scoreBreakdown,
             indicator.Close,
@@ -221,7 +228,7 @@ public static class CandidatePolicy
             stopLoss,
             targetPrice,
             riskReward,
-            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, isTradable));
+            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason));
     }
 
     /// <summary>
@@ -260,6 +267,8 @@ public static class CandidatePolicy
             candidate.StockName,
             candidate.IndustryName,
             candidate.StrategyType,
+            candidate.EligibilityStatus,
+            candidate.EligibilityReason,
             candidate.TotalScore,
             candidate.ScoreBreakdown,
             candidate.Close,
@@ -344,17 +353,57 @@ public static class CandidatePolicy
     /// </summary>
     private static CandidateGrade ResolveGrade(decimal totalScore)
     {
-        if (totalScore >= 60m)
+        if (totalScore >= 90m)
         {
             return CandidateGrade.A;
         }
 
-        if (totalScore >= 55m)
+        if (totalScore >= 85m)
         {
             return CandidateGrade.B;
         }
 
-        return CandidateGrade.C;
+        return totalScore >= 80m ? CandidateGrade.C : CandidateGrade.D;
+    }
+
+    private static CandidateEligibilityDecision ResolveEligibility(
+        decimal totalScore,
+        StrategyType strategyType,
+        MarketRegimeSnapshot regime,
+        bool isInTradablePool,
+        decimal riskReward)
+    {
+        if (!isInTradablePool)
+        {
+            return new CandidateEligibilityDecision(false, "observe_only", "当前账户权限未覆盖该市场，只保留观察资格。");
+        }
+
+        if (regime.Regime == MarketSignalEligibility.NoTrade)
+        {
+            return new CandidateEligibilityDecision(false, "observe_only", "当前市场状态不允许开新仓，只保留观察。");
+        }
+
+        if (regime.Regime == MarketSignalEligibility.WeakOpportunity && strategyType == StrategyType.Breakout)
+        {
+            return new CandidateEligibilityDecision(false, "observe_only", "弱机会市场不执行突破策略，先观察。");
+        }
+
+        if (totalScore < StrongWatchMinimumScore)
+        {
+            return new CandidateEligibilityDecision(false, "study_only", "评分低于 85 分，仅作为学习观察。");
+        }
+
+        if (totalScore < TradableMinimumScore)
+        {
+            return new CandidateEligibilityDecision(false, "strong_watch", "评分达到强观察区间，但还未达到 90 分可执行门槛。");
+        }
+
+        if (riskReward < 2m)
+        {
+            return new CandidateEligibilityDecision(false, "observe_only", "预期盈亏比低于 2，只保留观察。");
+        }
+
+        return new CandidateEligibilityDecision(true, "tradable", "满足当前执行条件。");
     }
 
     /// <summary>
@@ -418,7 +467,7 @@ public static class CandidatePolicy
         MarketRegimeSnapshot regime,
         CandidateScoreBreakdown breakdown,
         decimal riskReward,
-        bool isTradable)
+        string eligibilityReason)
     {
         return
             $"{profile.StockName} 当前总分 {breakdown.TotalScore:0.#} 分。"
@@ -426,7 +475,7 @@ public static class CandidatePolicy
             + $"行业强度排名：{industry?.Rank20d?.ToString() ?? "暂无"}。"
             + $"收盘价 {indicator.Close:0.##}，MA20 {indicator.Ma20:0.##}，MA60 {indicator.Ma60:0.##}。"
             + $"风险收益比 {riskReward:0.##}。"
-            + (isTradable ? "当前满足可执行条件。" : "当前仅建议观察。");
+            + eligibilityReason;
     }
 
     /// <summary>
@@ -442,4 +491,6 @@ public static class CandidatePolicy
             _ => "不交易"
         };
     }
+
+    private sealed record CandidateEligibilityDecision(bool IsTradable, string Status, string Reason);
 }

@@ -52,6 +52,7 @@ public static class StockDecisionSchemaInitializer
         }
 
         await EnsureSnapshotVersionColumnsAsync(dbContext, cancellationToken);
+        await EnsureExtendedBusinessColumnsAsync(dbContext, cancellationToken);
     }
 
     /// <summary>
@@ -114,6 +115,42 @@ public static class StockDecisionSchemaInitializer
         {
             var primaryKeySql = $"ALTER TABLE {tableName} DROP PRIMARY KEY, ADD PRIMARY KEY ({string.Join(", ", primaryKeyColumns)})";
             await dbContext.Database.ExecuteSqlRawAsync(primaryKeySql, cancellationToken);
+        }
+    }
+
+    private static async Task EnsureExtendedBusinessColumnsAsync(StockDecisionDbContext dbContext, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(dbContext, "strategy_candidates", "eligibility_status", "ALTER TABLE strategy_candidates ADD COLUMN eligibility_status VARCHAR(32) NOT NULL DEFAULT 'observe_only' AFTER is_tradable", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_candidates", "eligibility_reason", "ALTER TABLE strategy_candidates ADD COLUMN eligibility_reason VARCHAR(256) NOT NULL DEFAULT '' AFTER eligibility_status", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_trade_signals", "eligibility_status", "ALTER TABLE strategy_trade_signals ADD COLUMN eligibility_status VARCHAR(32) NOT NULL DEFAULT 'tradable' AFTER strategy_type", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_trade_signals", "eligibility_reason", "ALTER TABLE strategy_trade_signals ADD COLUMN eligibility_reason VARCHAR(256) NOT NULL DEFAULT '' AFTER eligibility_status", cancellationToken);
+
+        await EnsureColumnAsync(dbContext, "backtest_runs", "benchmark_return_pct", "ALTER TABLE backtest_runs ADD COLUMN benchmark_return_pct DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER total_return_pct", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "data_coverage_pct", "ALTER TABLE backtest_runs ADD COLUMN data_coverage_pct DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER benchmark_return_pct", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "skipped_trade_days", "ALTER TABLE backtest_runs ADD COLUMN skipped_trade_days INT NOT NULL DEFAULT 0 AFTER data_coverage_pct", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "annual_trade_count", "ALTER TABLE backtest_runs ADD COLUMN annual_trade_count DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER skipped_trade_days", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "max_consecutive_losses", "ALTER TABLE backtest_runs ADD COLUMN max_consecutive_losses INT NOT NULL DEFAULT 0 AFTER annual_trade_count", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "is_approved", "ALTER TABLE backtest_runs ADD COLUMN is_approved TINYINT(1) NOT NULL DEFAULT 0 AFTER max_consecutive_losses", cancellationToken);
+        await EnsureColumnAsync(dbContext, "backtest_runs", "failure_reasons", "ALTER TABLE backtest_runs ADD COLUMN failure_reasons LONGTEXT NOT NULL AFTER is_approved", cancellationToken);
+
+        await EnsureColumnAsync(dbContext, "learning_reviews", "error_tags", "ALTER TABLE learning_reviews ADD COLUMN error_tags LONGTEXT NOT NULL AFTER improvement_plan", cancellationToken);
+        await EnsureColumnAsync(dbContext, "learning_reviews", "is_strategy_aligned", "ALTER TABLE learning_reviews ADD COLUMN is_strategy_aligned TINYINT(1) NOT NULL DEFAULT 1 AFTER error_tags", cancellationToken);
+        await EnsureColumnAsync(dbContext, "learning_reviews", "followed_stop_loss", "ALTER TABLE learning_reviews ADD COLUMN followed_stop_loss TINYINT(1) NOT NULL DEFAULT 0 AFTER is_strategy_aligned", cancellationToken);
+        await EnsureColumnAsync(dbContext, "learning_reviews", "followed_take_profit", "ALTER TABLE learning_reviews ADD COLUMN followed_take_profit TINYINT(1) NOT NULL DEFAULT 0 AFTER followed_stop_loss", cancellationToken);
+        await EnsureColumnAsync(dbContext, "learning_reviews", "modified_plan_during_trade", "ALTER TABLE learning_reviews ADD COLUMN modified_plan_during_trade TINYINT(1) NOT NULL DEFAULT 0 AFTER followed_take_profit", cancellationToken);
+        await EnsureColumnAsync(dbContext, "learning_reviews", "followed_gap_rule", "ALTER TABLE learning_reviews ADD COLUMN followed_gap_rule TINYINT(1) NOT NULL DEFAULT 0 AFTER modified_plan_during_trade", cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        StockDecisionDbContext dbContext,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        if (!await ColumnExistsAsync(dbContext, tableName, columnName, cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
         }
     }
 
@@ -374,6 +411,8 @@ public static class StockDecisionSchemaInitializer
             industry_name VARCHAR(64) NULL,
             grade VARCHAR(8) NOT NULL,
             is_tradable TINYINT(1) NOT NULL,
+            eligibility_status VARCHAR(32) NOT NULL,
+            eligibility_reason VARCHAR(256) NOT NULL,
             total_score DECIMAL(10,4) NOT NULL,
             relative_strength_score_part DECIMAL(10,4) NOT NULL,
             trend_score_part DECIMAL(10,4) NOT NULL,
@@ -403,6 +442,8 @@ public static class StockDecisionSchemaInitializer
             strategy_type VARCHAR(32) NOT NULL,
             stock_name VARCHAR(64) NOT NULL,
             industry_name VARCHAR(64) NULL,
+            eligibility_status VARCHAR(32) NOT NULL,
+            eligibility_reason VARCHAR(256) NOT NULL,
             total_score DECIMAL(10,4) NOT NULL,
             relative_strength_score_part DECIMAL(10,4) NOT NULL,
             trend_score_part DECIMAL(10,4) NOT NULL,
@@ -497,6 +538,13 @@ public static class StockDecisionSchemaInitializer
             profit_loss_ratio DECIMAL(10,4) NOT NULL,
             max_drawdown_pct DECIMAL(10,4) NOT NULL,
             total_return_pct DECIMAL(10,4) NOT NULL,
+            benchmark_return_pct DECIMAL(10,4) NOT NULL,
+            data_coverage_pct DECIMAL(10,4) NOT NULL,
+            skipped_trade_days INT NOT NULL,
+            annual_trade_count DECIMAL(10,4) NOT NULL,
+            max_consecutive_losses INT NOT NULL,
+            is_approved TINYINT(1) NOT NULL,
+            failure_reasons LONGTEXT NOT NULL,
             average_holding_days DECIMAL(10,4) NOT NULL,
             created_at_utc DATETIME(6) NOT NULL,
             PRIMARY KEY (id),
@@ -546,6 +594,12 @@ public static class StockDecisionSchemaInitializer
             execution_discipline LONGTEXT NOT NULL,
             result_summary LONGTEXT NOT NULL,
             improvement_plan LONGTEXT NOT NULL,
+            error_tags LONGTEXT NOT NULL,
+            is_strategy_aligned TINYINT(1) NOT NULL,
+            followed_stop_loss TINYINT(1) NOT NULL,
+            followed_take_profit TINYINT(1) NOT NULL,
+            modified_plan_during_trade TINYINT(1) NOT NULL,
+            followed_gap_rule TINYINT(1) NOT NULL,
             created_at_utc DATETIME(6) NOT NULL,
             updated_at_utc DATETIME(6) NOT NULL,
             PRIMARY KEY (id),

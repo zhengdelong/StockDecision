@@ -325,6 +325,8 @@ public sealed record CandidateStock
         CandidateGrade grade,
         StrategyType strategyType,
         bool isTradable,
+        string eligibilityStatus,
+        string eligibilityReason,
         decimal totalScore,
         CandidateScoreBreakdown scoreBreakdown,
         decimal close,
@@ -348,6 +350,8 @@ public sealed record CandidateStock
         Grade = grade;
         StrategyType = strategyType;
         IsTradable = isTradable;
+        EligibilityStatus = eligibilityStatus;
+        EligibilityReason = eligibilityReason;
         TotalScore = totalScore;
         ScoreBreakdown = scoreBreakdown;
         Close = close;
@@ -399,6 +403,16 @@ public sealed record CandidateStock
     /// 是否达到可执行标准。
     /// </summary>
     public bool IsTradable { get; init; }
+
+    /// <summary>
+    /// 准入状态。
+    /// </summary>
+    public string EligibilityStatus { get; init; }
+
+    /// <summary>
+    /// 当前准入状态说明。
+    /// </summary>
+    public string EligibilityReason { get; init; }
 
     /// <summary>
     /// 综合得分。
@@ -490,6 +504,8 @@ public sealed record TradeSignal
         string stockName,
         string? industryName,
         StrategyType strategyType,
+        string eligibilityStatus,
+        string eligibilityReason,
         decimal totalScore,
         CandidateScoreBreakdown scoreBreakdown,
         decimal triggerPrice,
@@ -506,6 +522,8 @@ public sealed record TradeSignal
         StockName = stockName;
         IndustryName = industryName;
         StrategyType = strategyType;
+        EligibilityStatus = eligibilityStatus;
+        EligibilityReason = eligibilityReason;
         TotalScore = totalScore;
         ScoreBreakdown = scoreBreakdown;
         TriggerPrice = triggerPrice;
@@ -542,6 +560,16 @@ public sealed record TradeSignal
     /// 信号所属策略类型。
     /// </summary>
     public StrategyType StrategyType { get; init; }
+
+    /// <summary>
+    /// 准入状态。
+    /// </summary>
+    public string EligibilityStatus { get; init; }
+
+    /// <summary>
+    /// 当前准入状态说明。
+    /// </summary>
+    public string EligibilityReason { get; init; }
 
     /// <summary>
     /// 综合得分。

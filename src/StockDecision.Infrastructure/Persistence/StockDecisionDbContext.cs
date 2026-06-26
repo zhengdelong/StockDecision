@@ -331,6 +331,8 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.Grade).HasColumnName("grade");
             entity.Property(static item => item.StrategyType).HasColumnName("strategy_type");
             entity.Property(static item => item.IsTradable).HasColumnName("is_tradable");
+            entity.Property(static item => item.EligibilityStatus).HasColumnName("eligibility_status");
+            entity.Property(static item => item.EligibilityReason).HasColumnName("eligibility_reason");
             entity.Property(static item => item.TotalScore).HasColumnName("total_score");
             entity.Property(static item => item.RelativeStrengthScorePart).HasColumnName("relative_strength_score_part");
             entity.Property(static item => item.TrendScorePart).HasColumnName("trend_score_part");
@@ -354,6 +356,8 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.SnapshotVersion).HasMaxLength(32);
             entity.Property(static item => item.Grade).HasMaxLength(8);
             entity.Property(static item => item.StrategyType).HasMaxLength(32);
+            entity.Property(static item => item.EligibilityStatus).HasMaxLength(32);
+            entity.Property(static item => item.EligibilityReason).HasMaxLength(256);
             entity.Property(static item => item.TotalScore).HasPrecision(10, 4);
             entity.Property(static item => item.RelativeStrengthScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.TrendScorePart).HasPrecision(10, 4);
@@ -384,6 +388,8 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.StockName).HasColumnName("stock_name");
             entity.Property(static item => item.IndustryName).HasColumnName("industry_name");
             entity.Property(static item => item.StrategyType).HasColumnName("strategy_type");
+            entity.Property(static item => item.EligibilityStatus).HasColumnName("eligibility_status");
+            entity.Property(static item => item.EligibilityReason).HasColumnName("eligibility_reason");
             entity.Property(static item => item.TotalScore).HasColumnName("total_score");
             entity.Property(static item => item.RelativeStrengthScorePart).HasColumnName("relative_strength_score_part");
             entity.Property(static item => item.TrendScorePart).HasColumnName("trend_score_part");
@@ -401,6 +407,8 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.IndustryName).HasMaxLength(64);
             entity.Property(static item => item.SnapshotVersion).HasMaxLength(32);
             entity.Property(static item => item.StrategyType).HasMaxLength(32);
+            entity.Property(static item => item.EligibilityStatus).HasMaxLength(32);
+            entity.Property(static item => item.EligibilityReason).HasMaxLength(256);
             entity.Property(static item => item.TotalScore).HasPrecision(10, 4);
             entity.Property(static item => item.RelativeStrengthScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.TrendScorePart).HasPrecision(10, 4);
@@ -478,6 +486,13 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.ProfitLossRatio).HasColumnName("profit_loss_ratio").HasPrecision(10, 4);
             entity.Property(static item => item.MaxDrawdownPct).HasColumnName("max_drawdown_pct").HasPrecision(10, 4);
             entity.Property(static item => item.TotalReturnPct).HasColumnName("total_return_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.BenchmarkReturnPct).HasColumnName("benchmark_return_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.DataCoveragePct).HasColumnName("data_coverage_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.SkippedTradeDays).HasColumnName("skipped_trade_days");
+            entity.Property(static item => item.AnnualTradeCount).HasColumnName("annual_trade_count").HasPrecision(10, 4);
+            entity.Property(static item => item.MaxConsecutiveLosses).HasColumnName("max_consecutive_losses");
+            entity.Property(static item => item.IsApproved).HasColumnName("is_approved");
+            entity.Property(static item => item.FailureReasons).HasColumnName("failure_reasons").HasColumnType("longtext");
             entity.Property(static item => item.AverageHoldingDays).HasColumnName("average_holding_days").HasPrecision(10, 4);
             entity.Property(static item => item.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.HasIndex(static item => item.CreatedAtUtc);
@@ -530,6 +545,12 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.ExecutionDiscipline).HasColumnName("execution_discipline").HasColumnType("longtext");
             entity.Property(static item => item.ResultSummary).HasColumnName("result_summary").HasColumnType("longtext");
             entity.Property(static item => item.ImprovementPlan).HasColumnName("improvement_plan").HasColumnType("longtext");
+            entity.Property(static item => item.ErrorTags).HasColumnName("error_tags").HasColumnType("longtext");
+            entity.Property(static item => item.IsStrategyAligned).HasColumnName("is_strategy_aligned");
+            entity.Property(static item => item.FollowedStopLoss).HasColumnName("followed_stop_loss");
+            entity.Property(static item => item.FollowedTakeProfit).HasColumnName("followed_take_profit");
+            entity.Property(static item => item.ModifiedPlanDuringTrade).HasColumnName("modified_plan_during_trade");
+            entity.Property(static item => item.FollowedGapRule).HasColumnName("followed_gap_rule");
             entity.Property(static item => item.CreatedAtUtc).HasColumnName("created_at_utc");
             entity.Property(static item => item.UpdatedAtUtc).HasColumnName("updated_at_utc");
             entity.HasIndex(static item => item.StockCode);

@@ -13,6 +13,8 @@ export interface DashboardResponse {
   snapshotVersionName: string
   isDataComplete: boolean
   isSignalEligible: boolean
+  isBacktestApproved: boolean
+  backtestStatusNote: string
   marketRegime: string
   candidateCount: number
   signalCount: number
@@ -52,6 +54,8 @@ export interface CandidateItem {
   grade: string
   strategyType: string
   isTradable: boolean
+  eligibilityStatus: string
+  eligibilityReasons: string[]
   totalScore: number
   scoreBreakdown: ScoreBreakdown
   close: number
@@ -71,6 +75,8 @@ export interface SignalItem {
   stockName: string
   industryName: string | null
   strategyType: string
+  eligibilityStatus: string
+  eligibilityReasons: string[]
   totalScore: number
   scoreBreakdown: ScoreBreakdown
   triggerPrice: number
@@ -315,6 +321,13 @@ export interface BacktestOverviewResponse {
   averageReturnPct: number
   averageMaxGainPct: number
   averageMaxDrawdownPct: number
+  benchmarkReturnPct: number
+  dataCoveragePct: number
+  skippedTradeDays: number
+  annualTradeCount: number
+  maxConsecutiveLosses: number
+  isApproved: boolean
+  failureReasons: string[]
   trades: BacktestTradeItem[]
 }
 
@@ -399,6 +412,12 @@ export interface BacktestRunListItem {
   profitLossRatio: number
   maxDrawdownPct: number
   totalReturnPct: number
+  benchmarkReturnPct: number
+  dataCoveragePct: number
+  skippedTradeDays: number
+  annualTradeCount: number
+  maxConsecutiveLosses: number
+  isApproved: boolean
   createdAtUtc: string
 }
 
@@ -416,6 +435,13 @@ export interface BacktestRunDetail {
   profitLossRatio: number
   maxDrawdownPct: number
   totalReturnPct: number
+  benchmarkReturnPct: number
+  dataCoveragePct: number
+  skippedTradeDays: number
+  annualTradeCount: number
+  maxConsecutiveLosses: number
+  isApproved: boolean
+  failureReasons: string[]
   averageHoldingDays: number
   createdAtUtc: string
   equityCurve: BacktestEquityPoint[]
@@ -434,8 +460,27 @@ export interface LearningReviewItem {
   executionDiscipline: string
   resultSummary: string
   improvementPlan: string
+  errorTags: string[]
+  isStrategyAligned: boolean
+  followedStopLoss: boolean
+  followedTakeProfit: boolean
+  modifiedPlanDuringTrade: boolean
+  followedGapRule: boolean
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export interface LearningProgressSummary {
+  reviewCount: number
+  strategyAlignedTradeCount: number
+  offStrategyTradeCount: number
+  consecutiveStopLossFollowCount: number
+  consecutiveGapRuleFollowCount: number
+}
+
+export interface LearningErrorTagStat {
+  tag: string
+  count: number
 }
 
 export interface LearningReviewOverviewResponse {
@@ -444,6 +489,8 @@ export interface LearningReviewOverviewResponse {
   tradeDate: string | null
   snapshotVersion: string
   reviewPrompts: string[]
+  progressSummary: LearningProgressSummary
+  errorTagStats: LearningErrorTagStat[]
   reviews: LearningReviewItem[]
 }
 
@@ -459,4 +506,10 @@ export interface SaveLearningReviewRequest {
   executionDiscipline: string
   resultSummary: string
   improvementPlan: string
+  errorTags?: string[]
+  isStrategyAligned?: boolean
+  followedStopLoss?: boolean
+  followedTakeProfit?: boolean
+  modifiedPlanDuringTrade?: boolean
+  followedGapRule?: boolean
 }

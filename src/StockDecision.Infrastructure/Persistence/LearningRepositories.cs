@@ -52,6 +52,12 @@ public sealed class EfLearningReviewRepository(StockDecisionDbContext dbContext)
             entity.ExecutionDiscipline = draft.ExecutionDiscipline;
             entity.ResultSummary = draft.ResultSummary;
             entity.ImprovementPlan = draft.ImprovementPlan;
+            entity.ErrorTags = string.Join("|", draft.ErrorTags);
+            entity.IsStrategyAligned = draft.IsStrategyAligned;
+            entity.FollowedStopLoss = draft.FollowedStopLoss;
+            entity.FollowedTakeProfit = draft.FollowedTakeProfit;
+            entity.ModifiedPlanDuringTrade = draft.ModifiedPlanDuringTrade;
+            entity.FollowedGapRule = draft.FollowedGapRule;
             entity.UpdatedAtUtc = draft.TimestampUtc;
         }
         else
@@ -68,6 +74,12 @@ public sealed class EfLearningReviewRepository(StockDecisionDbContext dbContext)
                 ExecutionDiscipline = draft.ExecutionDiscipline,
                 ResultSummary = draft.ResultSummary,
                 ImprovementPlan = draft.ImprovementPlan,
+                ErrorTags = string.Join("|", draft.ErrorTags),
+                IsStrategyAligned = draft.IsStrategyAligned,
+                FollowedStopLoss = draft.FollowedStopLoss,
+                FollowedTakeProfit = draft.FollowedTakeProfit,
+                ModifiedPlanDuringTrade = draft.ModifiedPlanDuringTrade,
+                FollowedGapRule = draft.FollowedGapRule,
                 CreatedAtUtc = draft.TimestampUtc,
                 UpdatedAtUtc = draft.TimestampUtc
             };
@@ -87,6 +99,12 @@ public sealed class EfLearningReviewRepository(StockDecisionDbContext dbContext)
             entity.ExecutionDiscipline,
             entity.ResultSummary,
             entity.ImprovementPlan,
+            SplitTags(entity.ErrorTags),
+            entity.IsStrategyAligned,
+            entity.FollowedStopLoss,
+            entity.FollowedTakeProfit,
+            entity.ModifiedPlanDuringTrade,
+            entity.FollowedGapRule,
             entity.CreatedAtUtc,
             entity.UpdatedAtUtc);
     }
@@ -104,6 +122,19 @@ public sealed class EfLearningReviewRepository(StockDecisionDbContext dbContext)
             entity.ExecutionDiscipline,
             entity.ResultSummary,
             entity.ImprovementPlan,
+            SplitTags(entity.ErrorTags),
+            entity.IsStrategyAligned,
+            entity.FollowedStopLoss,
+            entity.FollowedTakeProfit,
+            entity.ModifiedPlanDuringTrade,
+            entity.FollowedGapRule,
             entity.CreatedAtUtc,
             entity.UpdatedAtUtc);
+
+    private static IReadOnlyList<string> SplitTags(string raw)
+    {
+        return string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
 }

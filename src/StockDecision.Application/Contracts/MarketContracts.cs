@@ -17,6 +17,8 @@ public sealed record DashboardResponse
         string snapshotVersionName,
         bool isDataComplete,
         bool isSignalEligible,
+        bool isBacktestApproved,
+        string backtestStatusNote,
         string marketRegime,
         int candidateCount,
         int signalCount,
@@ -28,6 +30,8 @@ public sealed record DashboardResponse
         SnapshotVersionName = snapshotVersionName;
         IsDataComplete = isDataComplete;
         IsSignalEligible = isSignalEligible;
+        IsBacktestApproved = isBacktestApproved;
+        BacktestStatusNote = backtestStatusNote;
         MarketRegime = marketRegime;
         CandidateCount = candidateCount;
         SignalCount = signalCount;
@@ -57,6 +61,15 @@ public sealed record DashboardResponse
     /// 当前市场是否允许执行信号。
     /// </summary>
     public bool IsSignalEligible { get; init; }
+    /// <summary>
+    /// 最近一次回测是否已通过准入标准。
+    /// </summary>
+    public bool IsBacktestApproved { get; init; }
+
+    /// <summary>
+    /// 回测准入状态说明。
+    /// </summary>
+    public string BacktestStatusNote { get; init; }
 
     /// <summary>
     /// 市场环境文本。
@@ -231,6 +244,8 @@ public sealed record CandidateListItemResponse
         string grade,
         string strategyType,
         bool isTradable,
+        string eligibilityStatus,
+        IReadOnlyList<string> eligibilityReasons,
         decimal totalScore,
         CandidateScoreBreakdown scoreBreakdown,
         decimal close,
@@ -250,6 +265,8 @@ public sealed record CandidateListItemResponse
         Grade = grade;
         StrategyType = strategyType;
         IsTradable = isTradable;
+        EligibilityStatus = eligibilityStatus;
+        EligibilityReasons = eligibilityReasons;
         TotalScore = totalScore;
         ScoreBreakdown = scoreBreakdown;
         Close = close;
@@ -276,6 +293,10 @@ public sealed record CandidateListItemResponse
     public string StrategyType { get; init; }
     /// <summary>是否可执行。</summary>
     public bool IsTradable { get; init; }
+    /// <summary>准入状态。</summary>
+    public string EligibilityStatus { get; init; }
+    /// <summary>准入原因。</summary>
+    public IReadOnlyList<string> EligibilityReasons { get; init; }
     /// <summary>综合得分。</summary>
     public decimal TotalScore { get; init; }
     /// <summary>评分拆解。</summary>
@@ -314,6 +335,8 @@ public sealed record SignalListItemResponse
         string stockName,
         string? industryName,
         string strategyType,
+        string eligibilityStatus,
+        IReadOnlyList<string> eligibilityReasons,
         decimal totalScore,
         CandidateScoreBreakdown scoreBreakdown,
         decimal triggerPrice,
@@ -329,6 +352,8 @@ public sealed record SignalListItemResponse
         StockName = stockName;
         IndustryName = industryName;
         StrategyType = strategyType;
+        EligibilityStatus = eligibilityStatus;
+        EligibilityReasons = eligibilityReasons;
         TotalScore = totalScore;
         ScoreBreakdown = scoreBreakdown;
         TriggerPrice = triggerPrice;
@@ -349,6 +374,10 @@ public sealed record SignalListItemResponse
     public string? IndustryName { get; init; }
     /// <summary>策略类型。</summary>
     public string StrategyType { get; init; }
+    /// <summary>准入状态。</summary>
+    public string EligibilityStatus { get; init; }
+    /// <summary>准入原因。</summary>
+    public IReadOnlyList<string> EligibilityReasons { get; init; }
     /// <summary>综合得分。</summary>
     public decimal TotalScore { get; init; }
     /// <summary>评分拆解。</summary>
@@ -932,6 +961,13 @@ public sealed record BacktestOverviewResponse(
     decimal AverageReturnPct,
     decimal AverageMaxGainPct,
     decimal AverageMaxDrawdownPct,
+    decimal BenchmarkReturnPct,
+    decimal DataCoveragePct,
+    int SkippedTradeDays,
+    decimal AnnualTradeCount,
+    int MaxConsecutiveLosses,
+    bool IsApproved,
+    IReadOnlyList<string> FailureReasons,
     IReadOnlyList<BacktestTradeItemResponse> Trades);
 
 /// <summary>

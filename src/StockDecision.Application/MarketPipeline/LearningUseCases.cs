@@ -22,6 +22,7 @@ public sealed class GetLearningReviewOverviewUseCase(ILearningReviewRepository l
         var reviews = string.IsNullOrWhiteSpace(stockCode)
             ? await learningReviewRepository.GetReviewsAsync(cancellationToken)
             : await learningReviewRepository.GetReviewsByStockAsync(stockCode, cancellationToken);
+        var orderedReviews = reviews.OrderByDescending(static item => item.UpdatedAtUtc).ToList();
 
         return new LearningReviewOverviewResponse(
             stockCode,
@@ -29,7 +30,9 @@ public sealed class GetLearningReviewOverviewUseCase(ILearningReviewRepository l
             tradeDate,
             resolvedSnapshotVersion,
             BuildReviewPrompts(),
-            reviews.OrderByDescending(static item => item.UpdatedAtUtc).ToList());
+            BuildProgressSummary(orderedReviews),
+            BuildErrorTagStats(orderedReviews),
+            orderedReviews);
     }
 
     /// <summary>
@@ -45,6 +48,43 @@ public sealed class GetLearningReviewOverviewUseCase(ILearningReviewRepository l
             "最终结果的好坏，主要来自策略本身，还是来自执行偏差？",
             "如果再来一次，这笔交易你最想改掉的一个动作是什么？"
         ];
+    }
+
+    private static LearningProgressSummaryResponse BuildProgressSummary(IReadOnlyList<LearningReviewItemResponse> reviews)
+    {
+        return new LearningProgressSummaryResponse(
+            reviews.Count,
+            reviews.Count(static item => item.IsStrategyAligned),
+            reviews.Count(static item => !item.IsStrategyAligned),
+            CountConsecutive(reviews, static item => item.FollowedStopLoss),
+            CountConsecutive(reviews, static item => item.FollowedGapRule));
+    }
+
+    private static IReadOnlyList<LearningErrorTagStatResponse> BuildErrorTagStats(IReadOnlyList<LearningReviewItemResponse> reviews)
+    {
+        return reviews
+            .SelectMany(static item => item.ErrorTags)
+            .GroupBy(static item => item, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new LearningErrorTagStatResponse(group.Key, group.Count()))
+            .OrderByDescending(static item => item.Count)
+            .ThenBy(static item => item.Tag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static int CountConsecutive(IReadOnlyList<LearningReviewItemResponse> reviews, Func<LearningReviewItemResponse, bool> selector)
+    {
+        var count = 0;
+        foreach (var review in reviews.OrderByDescending(static item => item.TradeDate).ThenByDescending(static item => item.UpdatedAtUtc))
+        {
+            if (!selector(review))
+            {
+                break;
+            }
+
+            count++;
+        }
+
+        return count;
     }
 }
 
@@ -91,7 +131,14 @@ public sealed class SaveLearningReviewUseCase(ILearningReviewRepository learning
                 request.ExecutionDiscipline.Trim(),
                 request.ResultSummary.Trim(),
                 request.ImprovementPlan.Trim(),
+                request.ErrorTags?.Where(static item => !string.IsNullOrWhiteSpace(item)).Select(static item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
+                request.IsStrategyAligned,
+                request.FollowedStopLoss,
+                request.FollowedTakeProfit,
+                request.ModifiedPlanDuringTrade,
+                request.FollowedGapRule,
                 DateTime.UtcNow),
             cancellationToken);
     }
+
 }

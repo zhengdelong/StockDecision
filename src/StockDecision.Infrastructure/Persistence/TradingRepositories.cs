@@ -204,6 +204,13 @@ public sealed class EfBacktestRunRepository(StockDecisionDbContext dbContext) : 
             ProfitLossRatio = draft.ProfitLossRatio,
             MaxDrawdownPct = draft.MaxDrawdownPct,
             TotalReturnPct = draft.TotalReturnPct,
+            BenchmarkReturnPct = draft.BenchmarkReturnPct,
+            DataCoveragePct = draft.DataCoveragePct,
+            SkippedTradeDays = draft.SkippedTradeDays,
+            AnnualTradeCount = draft.AnnualTradeCount,
+            MaxConsecutiveLosses = draft.MaxConsecutiveLosses,
+            IsApproved = draft.IsApproved,
+            FailureReasons = draft.FailureReasons,
             AverageHoldingDays = draft.AverageHoldingDays,
             CreatedAtUtc = draft.CreatedAtUtc
         };
@@ -258,6 +265,12 @@ public sealed class EfBacktestRunRepository(StockDecisionDbContext dbContext) : 
                 item.ProfitLossRatio,
                 item.MaxDrawdownPct,
                 item.TotalReturnPct,
+                item.BenchmarkReturnPct,
+                item.DataCoveragePct,
+                item.SkippedTradeDays,
+                item.AnnualTradeCount,
+                item.MaxConsecutiveLosses,
+                item.IsApproved,
                 item.CreatedAtUtc))
             .ToListAsync(cancellationToken);
     }
@@ -315,6 +328,13 @@ public sealed class EfBacktestRunRepository(StockDecisionDbContext dbContext) : 
             run.ProfitLossRatio,
             run.MaxDrawdownPct,
             run.TotalReturnPct,
+            run.BenchmarkReturnPct,
+            run.DataCoveragePct,
+            run.SkippedTradeDays,
+            run.AnnualTradeCount,
+            run.MaxConsecutiveLosses,
+            run.IsApproved,
+            SplitFailureReasons(run.FailureReasons),
             run.AverageHoldingDays,
             run.CreatedAtUtc,
             equityCurve,
@@ -332,5 +352,12 @@ public sealed class EfBacktestRunRepository(StockDecisionDbContext dbContext) : 
             .FirstOrDefaultAsync(cancellationToken);
 
         return latestId is null ? null : await GetRunAsync(latestId.Value, cancellationToken);
+    }
+
+    private static IReadOnlyList<string> SplitFailureReasons(string raw)
+    {
+        return string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }

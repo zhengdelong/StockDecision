@@ -383,6 +383,10 @@ public sealed class StrategyCandidateEntity
     public string StrategyType { get; set; } = string.Empty;
     /// <summary>是否可执行。</summary>
     public bool IsTradable { get; set; }
+    /// <summary>准入状态。</summary>
+    public string EligibilityStatus { get; set; } = string.Empty;
+    /// <summary>准入原因。</summary>
+    public string EligibilityReason { get; set; } = string.Empty;
     /// <summary>总分。</summary>
     public decimal TotalScore { get; set; }
     /// <summary>相对强弱分项。</summary>
@@ -438,6 +442,10 @@ public sealed class StrategyTradeSignalEntity
     public string? IndustryName { get; set; }
     /// <summary>策略类型。</summary>
     public string StrategyType { get; set; } = string.Empty;
+    /// <summary>准入状态。</summary>
+    public string EligibilityStatus { get; set; } = string.Empty;
+    /// <summary>准入原因。</summary>
+    public string EligibilityReason { get; set; } = string.Empty;
     /// <summary>总分。</summary>
     public decimal TotalScore { get; set; }
     /// <summary>相对强弱分项。</summary>

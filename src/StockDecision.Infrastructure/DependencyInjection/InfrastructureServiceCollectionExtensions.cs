@@ -27,8 +27,14 @@ public static class InfrastructureServiceCollectionExtensions
         {
             ConnectionString = connectionString
         };
+        var tradingPermissions = new TradingPermissionsOptions
+        {
+            EnableMainBoard = bool.TryParse(configuration["TradingPermissions:EnableMainBoard"], out var enableMainBoard) ? enableMainBoard : true,
+            EnableChiNext = bool.TryParse(configuration["TradingPermissions:EnableChiNext"], out var enableChiNext) ? enableChiNext : true
+        };
 
         services.AddSingleton(databaseOptions);
+        services.AddSingleton(tradingPermissions);
         services.AddDbContext<StockDecisionDbContext>(options =>
             options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
         services.AddScoped<IRawMarketDataRepository, EfRawMarketDataRepository>();

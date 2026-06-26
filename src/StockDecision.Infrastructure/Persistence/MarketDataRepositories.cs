@@ -40,6 +40,22 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
 
         if (latestStocksFastPath.Count > 0)
         {
+            var latestStockCodesFastPath = latestStocksFastPath.Select(static item => item.StockCode).ToList();
+            var latestValuationFastPath = await dbContext.RawStocks
+                .AsNoTracking()
+                .Where(item => latestStockCodesFastPath.Contains(item.StockCode))
+                .GroupBy(static item => item.StockCode)
+                .Select(static group => group
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Select(item => new
+                    {
+                        item.StockCode,
+                        item.Pe,
+                        item.Pb
+                    })
+                    .First())
+                .ToDictionaryAsync(static item => item.StockCode, cancellationToken);
+
             var stocksNeedingMetadataFallback = latestStocksFastPath
                 .Where(static item => string.IsNullOrWhiteSpace(item.IndustryName) || item.ListDate is null)
                 .Select(static item => item.StockCode)
@@ -109,6 +125,7 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
             {
                 latestDailyFastPath.TryGetValue(item.StockCode, out var latestBar);
                 latestFinancialFastPath.TryGetValue(item.StockCode, out var financial);
+                latestValuationFastPath.TryGetValue(item.StockCode, out var valuation);
                 amountHistoryFastPath.TryGetValue(item.StockCode, out var averageAmount20d);
                 latestIndustryFallbackFastPath.TryGetValue(item.StockCode, out var fallbackIndustryName);
                 latestListDateFallbackFastPath.TryGetValue(item.StockCode, out var fallbackListDate);
@@ -127,8 +144,8 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
                     item.IsDelistingRisk,
                     resolvedListDate,
                     latestBar?.Close,
-                    financial?.Pe,
-                    financial?.Pb,
+                    valuation?.Pe ?? financial?.Pe,
+                    valuation?.Pb ?? financial?.Pb,
                     financial?.FreeFloatMarketCap,
                     latestBar?.TurnoverRate,
                     averageAmount20d,
@@ -150,6 +167,22 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
                 item.ListDate
             })
             .ToListAsync(cancellationToken);
+
+        var latestStockCodes = latestStocks.Select(static item => item.StockCode).ToList();
+        var latestValuationByStock = await dbContext.RawStocks
+            .AsNoTracking()
+            .Where(item => latestStockCodes.Contains(item.StockCode))
+            .GroupBy(static item => item.StockCode)
+            .Select(static group => group
+                .OrderByDescending(item => item.CreatedAt)
+                .Select(item => new
+                {
+                    item.StockCode,
+                    item.Pe,
+                    item.Pb
+                })
+                .First())
+            .ToDictionaryAsync(static item => item.StockCode, cancellationToken);
 
         // 行业和上市日期属于低频元数据，若最新快照缺失，则沿用历史上最近一次非空值。
         var latestIndustryByStock = await dbContext.RawStocks
@@ -206,6 +239,7 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
         {
             latestDaily.TryGetValue(item.StockCode, out var latestBar);
             latestFinancial.TryGetValue(item.StockCode, out var financial);
+            latestValuationByStock.TryGetValue(item.StockCode, out var valuation);
             amountHistory.TryGetValue(item.StockCode, out var averageAmount20d);
             latestIndustryByStock.TryGetValue(item.StockCode, out var fallbackIndustryName);
             latestListDateByStock.TryGetValue(item.StockCode, out var fallbackListDate);
@@ -224,8 +258,8 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
                 item.IsDelistingRisk,
                 resolvedListDate,
                 latestBar?.Close,
-                financial?.Pe,
-                financial?.Pb,
+                valuation?.Pe ?? financial?.Pe,
+                valuation?.Pb ?? financial?.Pb,
                 financial?.FreeFloatMarketCap,
                 latestBar?.TurnoverRate,
                 averageAmount20d,
@@ -637,6 +671,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
             Grade = item.Grade.ToString(),
             StrategyType = item.StrategyType.ToString(),
             IsTradable = item.IsTradable,
+            EligibilityStatus = item.EligibilityStatus,
+            EligibilityReason = item.EligibilityReason,
             TotalScore = item.TotalScore,
             RelativeStrengthScorePart = item.ScoreBreakdown.RelativeStrengthScore,
             TrendScorePart = item.ScoreBreakdown.TrendScore,
@@ -675,6 +711,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
             StockName = item.StockName,
             IndustryName = item.IndustryName,
             StrategyType = item.StrategyType.ToString(),
+            EligibilityStatus = item.EligibilityStatus,
+            EligibilityReason = item.EligibilityReason,
             TotalScore = item.TotalScore,
             RelativeStrengthScorePart = item.ScoreBreakdown.RelativeStrengthScore,
             TrendScorePart = item.ScoreBreakdown.TrendScore,
@@ -730,6 +768,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
                 Enum.Parse<CandidateGrade>(item.Grade),
                 Enum.Parse<StrategyType>(item.StrategyType),
                 item.IsTradable,
+                item.EligibilityStatus,
+                item.EligibilityReason,
                 item.TotalScore,
                 new CandidateScoreBreakdown(item.RelativeStrengthScorePart, item.TrendScorePart, item.VolumePriceScorePart, item.FundamentalScorePart, null),
                 item.Close,
@@ -762,6 +802,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
                 item.StockName,
                 item.IndustryName,
                 Enum.Parse<StrategyType>(item.StrategyType),
+                item.EligibilityStatus,
+                item.EligibilityReason,
                 item.TotalScore,
                 new CandidateScoreBreakdown(item.RelativeStrengthScorePart, item.TrendScorePart, item.VolumePriceScorePart, item.FundamentalScorePart, null),
                 item.TriggerPrice,
@@ -824,6 +866,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
             Enum.Parse<CandidateGrade>(row.Grade),
             Enum.Parse<StrategyType>(row.StrategyType),
             row.IsTradable,
+            row.EligibilityStatus,
+            row.EligibilityReason,
             row.TotalScore,
             new CandidateScoreBreakdown(row.RelativeStrengthScorePart, row.TrendScorePart, row.VolumePriceScorePart, row.FundamentalScorePart, null),
             row.Close,
@@ -854,6 +898,8 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
             row.StockName,
             row.IndustryName,
             Enum.Parse<StrategyType>(row.StrategyType),
+            row.EligibilityStatus,
+            row.EligibilityReason,
             row.TotalScore,
             new CandidateScoreBreakdown(row.RelativeStrengthScorePart, row.TrendScorePart, row.VolumePriceScorePart, row.FundamentalScorePart, null),
             row.TriggerPrice,

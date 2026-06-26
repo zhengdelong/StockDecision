@@ -37,6 +37,18 @@ public sealed class LearningReviewEntity
 
     /// <summary>改进计划。</summary>
     public string ImprovementPlan { get; set; } = string.Empty;
+    /// <summary>错误标签，使用 | 分隔。</summary>
+    public string ErrorTags { get; set; } = string.Empty;
+    /// <summary>是否策略内交易。</summary>
+    public bool IsStrategyAligned { get; set; }
+    /// <summary>是否执行止损纪律。</summary>
+    public bool FollowedStopLoss { get; set; }
+    /// <summary>是否执行止盈纪律。</summary>
+    public bool FollowedTakeProfit { get; set; }
+    /// <summary>是否中途改计划。</summary>
+    public bool ModifiedPlanDuringTrade { get; set; }
+    /// <summary>是否遵守高开放弃规则。</summary>
+    public bool FollowedGapRule { get; set; }
 
     /// <summary>创建时间。</summary>
     public DateTime CreatedAtUtc { get; set; }
