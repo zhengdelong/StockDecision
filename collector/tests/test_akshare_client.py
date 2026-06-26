@@ -100,6 +100,48 @@ class SpotProviderWithIndustryBoardMembers:
         return [{"代码": "605020", "名称": "永和股份"}]
 
 
+class SpotProviderWithGenericIndustryAndBoardMembers:
+    def stock_zh_a_spot_em(self):
+        return [{"代码": "002317", "名称": "众生药业"}]
+
+    def stock_info_sz_name_code(self, symbol: str):
+        return [{"A股代码": "002317", "A股简称": "众生药业", "所属行业": "C 制造业"}]
+
+    def stock_info_sh_name_code(self, symbol: str):
+        return []
+
+    def stock_info_bj_name_code(self):
+        return []
+
+    def stock_board_industry_name_em(self):
+        return [{"板块名称": "化学制品", "板块代码": "BK1234"}]
+
+    def stock_board_industry_cons_em(self, symbol: str):
+        assert symbol == "BK1234"
+        return [{"代码": "002317", "名称": "众生药业"}]
+
+
+class SpotProviderWithSpotGenericIndustryAndBoardMembers:
+    def stock_zh_a_spot_em(self):
+        return [{"代码": "sz002317", "名称": "众生药业", "所处行业": "C 制造业", "上市时间": "2009-12-11"}]
+
+    def stock_info_sz_name_code(self, symbol: str):
+        return [{"A股代码": "002317", "A股简称": "众生药业", "所属行业": "C 制造业"}]
+
+    def stock_info_sh_name_code(self, symbol: str):
+        return []
+
+    def stock_info_bj_name_code(self):
+        return []
+
+    def stock_board_industry_name_em(self):
+        return [{"板块名称": "化学制品", "板块代码": "BK1234"}]
+
+    def stock_board_industry_cons_em(self, symbol: str):
+        assert symbol == "BK1234"
+        return [{"代码": "002317", "名称": "众生药业"}]
+
+
 class IndexFallbackProvider:
     def stock_zh_index_daily(self, symbol: str):
         assert symbol == "sh000300"
@@ -278,6 +320,22 @@ def test_fetch_stock_spot_snapshot_enriches_industry_from_board_members() -> Non
     rows = client.fetch_stock_spot_snapshot()
 
     assert rows == [{"代码": "605020", "名称": "永和股份", "所处行业": "化学制品", "上市时间": None}]
+
+
+def test_fetch_stock_spot_snapshot_board_members_override_generic_industry() -> None:
+    client = AkshareClient(provider=SpotProviderWithGenericIndustryAndBoardMembers())
+
+    rows = client.fetch_stock_spot_snapshot()
+
+    assert rows == [{"代码": "002317", "名称": "众生药业", "所处行业": "化学制品", "上市时间": None}]
+
+
+def test_fetch_stock_spot_snapshot_overrides_generic_spot_industry() -> None:
+    client = AkshareClient(provider=SpotProviderWithSpotGenericIndustryAndBoardMembers())
+
+    rows = client.fetch_stock_spot_snapshot()
+
+    assert rows == [{"代码": "sz002317", "名称": "众生药业", "所处行业": "化学制品", "上市时间": "2009-12-11"}]
 
 
 def test_fetch_daily_bars_treats_missing_date_keyerror_as_empty_payload() -> None:

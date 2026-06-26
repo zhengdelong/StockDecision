@@ -528,32 +528,57 @@ public sealed class GetIndustriesUseCase(
 /// <summary>
 /// 读取财务质量列表。
 /// </summary>
-public sealed class GetFinancialsUseCase(IMarketDataRepository marketRepository)
+public sealed class GetFinancialsUseCase(
+    EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
+    IMarketDataRepository marketRepository)
 {
     /// <summary>
     /// 返回最新财务快照分页列表。
     /// </summary>
     public async Task<PagedResponse<FinancialListItemResponse>> ExecuteAsync(FinancialListQuery query, CancellationToken cancellationToken = default)
     {
-        var financials = await marketRepository.GetLatestFinancialSnapshotsAsync(cancellationToken);
-        var profiles = await marketRepository.GetStockProfilesByCodesAsync(financials.Select(static item => item.StockCode), cancellationToken);
+        var snapshotVersion = StrategySnapshotVersionResolver.Resolve(query.SnapshotVersion);
+        var resolvedDate = query.Date ?? await ensureLatestSnapshot.ExecuteAsync(snapshotVersion, cancellationToken);
+        if (resolvedDate is null)
+        {
+            return new PagedResponse<FinancialListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
+        }
 
-        var items = financials
-            .Select(financial =>
+        var indicators = await marketRepository.GetIndicatorSnapshotsAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
+        var profiles = await marketRepository.GetStockProfilesByCodesAsync(indicators.Select(static item => item.StockCode), cancellationToken);
+        var financials = await marketRepository.GetLatestFinancialsByCodesAsync(indicators.Select(static item => item.StockCode), cancellationToken);
+        var industries = await marketRepository.GetIndustryStatsByNamesAsync(
+            resolvedDate.Value,
+            profiles.Values.Select(static item => item.IndustryName).Distinct().ToList(),
+            cancellationToken);
+
+        var items = indicators
+            .Select(indicator =>
             {
-                profiles.TryGetValue(financial.StockCode, out var profile);
+                if (!profiles.TryGetValue(indicator.StockCode, out var profile))
+                {
+                    return null;
+                }
+
+                financials.TryGetValue(indicator.StockCode, out var financial);
+                industries.TryGetValue(profile.IndustryName ?? string.Empty, out var industry);
+                var scoreBreakdown = CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry);
+
                 return new FinancialListItemResponse(
-                    financial.StockCode,
-                    profile?.StockName ?? financial.StockCode,
-                    profile?.IndustryName,
-                    financial.ReportDate,
-                    financial.Pe ?? profile?.Pe,
-                    financial.Pb ?? profile?.Pb,
-                    financial.Roe,
-                    financial.RevenueYoy,
-                    financial.NetProfitYoy,
-                    financial.FreeFloatMarketCap);
+                    indicator.StockCode,
+                    profile.StockName,
+                    profile.IndustryName,
+                    financial?.ReportDate,
+                    scoreBreakdown.TotalScore,
+                    financial?.Pe ?? profile.Pe,
+                    financial?.Pb ?? profile.Pb,
+                    financial?.Roe,
+                    financial?.RevenueYoy,
+                    financial?.NetProfitYoy,
+                    financial?.FreeFloatMarketCap ?? profile.FreeFloatMarketCap);
             })
+            .Where(static item => item is not null)
+            .Cast<FinancialListItemResponse>()
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -576,8 +601,9 @@ public sealed class GetFinancialsUseCase(IMarketDataRepository marketRepository)
             items = items.Where(item => (item.RevenueYoy ?? 0m) > 0m && (item.NetProfitYoy ?? 0m) > 0m).ToList();
         }
 
-        items = (query.SortBy ?? "roe").ToLowerInvariant() switch
+        items = (query.SortBy ?? "score").ToLowerInvariant() switch
         {
+            "score" => items.OrderByDescending(item => item.TotalScore ?? decimal.MinValue).ThenByDescending(item => item.Roe ?? decimal.MinValue).ToList(),
             "revenue" => items.OrderByDescending(item => item.RevenueYoy ?? decimal.MinValue).ToList(),
             "profit" => items.OrderByDescending(item => item.NetProfitYoy ?? decimal.MinValue).ToList(),
             "marketcap" => items.OrderByDescending(item => item.FreeFloatMarketCap ?? decimal.MinValue).ToList(),
@@ -1045,11 +1071,13 @@ public sealed class GetStockDetailUseCase(
         }
 
         var latestBar = latestBarHistory.OrderBy(static item => item.TradeDate).Last();
+        var industry = await ResolveIndustryAsync(profile.IndustryName, resolvedDate.Value, cancellationToken);
+        var regime = await marketRepository.GetMarketRegimeAsync(resolvedDate.Value, snapshotVersion, cancellationToken)
+            ?? new MarketRegimeSnapshot(resolvedDate.Value, MarketSignalEligibility.NoTrade, 0, false, "暂无市场环境快照");
         CandidateListItemResponse? candidateResponse = null;
         if (candidate is not null)
         {
             // 详情页按最新规则重建一次评分拆解，避免数据库中仅有汇总分而缺少逐条明细。
-            var industry = await ResolveIndustryAsync(profile.IndustryName, resolvedDate.Value, cancellationToken);
             var scoreBreakdown = indicator is null
                 ? candidate.ScoreBreakdown
                 : CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry);
@@ -1075,6 +1103,39 @@ public sealed class GetStockDetailUseCase(
                 candidate.RiskRewardRatio,
                 candidate.Explanation,
                 MarketResponseMapper.BuildScoreRuleDetails(scoreBreakdown));
+        }
+        else if (indicator is not null)
+        {
+            var preview = CandidatePolicy.DescribeCandidatePreview(
+                resolvedDate.Value,
+                profile,
+                indicator,
+                financial,
+                industry,
+                regime,
+                TradingBoardClassifier.IsInTradablePool(profile.StockCode, new TradingPermissionsOptions()));
+
+            candidateResponse = new CandidateListItemResponse(
+                preview.StockCode,
+                preview.StockName,
+                preview.IndustryName,
+                MarketResponseMapper.FormatCandidateGrade(preview.Grade),
+                MarketResponseMapper.FormatStrategyType(preview.StrategyType),
+                preview.IsTradable,
+                MarketResponseMapper.FormatEligibilityStatus(preview.EligibilityStatus),
+                MarketResponseMapper.BuildEligibilityReasons(preview.EligibilityReason),
+                preview.TotalScore,
+                preview.ScoreBreakdown,
+                preview.Close,
+                preview.Ma20,
+                preview.Ma60,
+                preview.Atr14,
+                preview.RelativeStrengthScore,
+                preview.StopLossPrice,
+                preview.TargetPrice,
+                preview.RiskRewardRatio,
+                preview.Explanation,
+                MarketResponseMapper.BuildScoreRuleDetails(preview.ScoreBreakdown));
         }
 
         return new StockDetailResponse(

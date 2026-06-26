@@ -196,9 +196,11 @@ public sealed record IndustryListQuery
 /// </summary>
 public sealed record FinancialListQuery
 {
+    public DateOnly? Date { get; init; }
+    public string? SnapshotVersion { get; init; }
     /// <summary>搜索关键字，匹配代码、名称和行业。</summary>
     public string? Search { get; init; }
-    /// <summary>排序字段，支持 roe、revenue、profit、marketCap。</summary>
+    /// <summary>排序字段，支持 score、roe、revenue、profit、marketCap。</summary>
     public string? SortBy { get; init; }
     /// <summary>最低 ROE 过滤。</summary>
     public decimal? MinRoe { get; init; }
@@ -421,7 +423,8 @@ public sealed record FinancialListItemResponse(
     string StockCode,
     string StockName,
     string? IndustryName,
-    DateOnly ReportDate,
+    DateOnly? ReportDate,
+    decimal? TotalScore,
     decimal? Pe,
     decimal? Pb,
     decimal? Roe,

@@ -139,6 +139,47 @@ public static class CandidatePolicy
         return BuildScoreBreakdown(profile, indicator, financial, industry);
     }
 
+    public static CandidateListPreview DescribeCandidatePreview(
+        DateOnly tradeDate,
+        StockProfile profile,
+        IndicatorSnapshot indicator,
+        FinancialSnapshot? financial,
+        IndustryDailyStat? industry,
+        MarketRegimeSnapshot regime,
+        bool isInTradablePool)
+    {
+        var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry);
+        var totalScore = scoreBreakdown.TotalScore;
+        var strategyType = ResolveStrategyType(indicator, regime);
+        var stopLoss = ResolveStopLoss(indicator.Close, indicator.Ma20, strategyType);
+        var targetPrice = ResolveTargetPrice(indicator.Close, strategyType);
+        var riskReward = CalculateRiskReward(indicator.Close, stopLoss, targetPrice);
+        var grade = ResolveGrade(totalScore);
+        var eligibility = ResolveEligibility(totalScore, strategyType, regime, isInTradablePool, riskReward);
+
+        return new CandidateListPreview(
+            tradeDate,
+            profile.StockCode,
+            profile.StockName,
+            profile.IndustryName,
+            grade,
+            strategyType,
+            eligibility.IsTradable,
+            eligibility.Status,
+            eligibility.Reason,
+            totalScore,
+            scoreBreakdown,
+            indicator.Close,
+            indicator.Ma20,
+            indicator.Ma60,
+            indicator.Atr14,
+            indicator.RelativeStrengthScore,
+            stopLoss,
+            targetPrice,
+            riskReward,
+            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason));
+    }
+
     /// <summary>
     /// 根据画像、指标和市场环境评估候选股。
     /// </summary>
@@ -494,3 +535,25 @@ public static class CandidatePolicy
 
     private sealed record CandidateEligibilityDecision(bool IsTradable, string Status, string Reason);
 }
+
+public sealed record CandidateListPreview(
+    DateOnly TradeDate,
+    string StockCode,
+    string StockName,
+    string? IndustryName,
+    CandidateGrade Grade,
+    StrategyType StrategyType,
+    bool IsTradable,
+    string EligibilityStatus,
+    string EligibilityReason,
+    decimal TotalScore,
+    CandidateScoreBreakdown ScoreBreakdown,
+    decimal Close,
+    decimal Ma20,
+    decimal Ma60,
+    decimal Atr14,
+    decimal RelativeStrengthScore,
+    decimal StopLossPrice,
+    decimal TargetPrice,
+    decimal RiskRewardRatio,
+    string Explanation);

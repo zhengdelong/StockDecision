@@ -116,7 +116,7 @@ public class MarketControllersTests
     public async Task FinancialsController_Should_Return_Financial_Summary_List()
     {
         var fixture = CreateFixture();
-        var controller = new FinancialsController(new GetFinancialsUseCase(fixture.MarketRepository));
+        var controller = new FinancialsController(new GetFinancialsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository));
 
         var result = await controller.Get(new FinancialListQuery(), CancellationToken.None);
 
@@ -125,6 +125,7 @@ public class MarketControllersTests
         var financial = Assert.Single(response.Items);
         Assert.Equal("600001", financial.StockCode);
         Assert.Equal("Alpha Tech", financial.StockName);
+        Assert.Equal(91m, financial.TotalScore);
         Assert.Equal(12.4m, financial.Roe);
     }
 

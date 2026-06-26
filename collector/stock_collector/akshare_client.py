@@ -71,7 +71,8 @@ class AkshareClient:
                 continue
 
             enriched = dict(row)
-            if not enriched.get("所处行业") and not enriched.get("industry"):
+            current_industry_name = str(enriched.get("所处行业") or enriched.get("industry") or "").strip()
+            if (not current_industry_name) or self._is_generic_industry_name(current_industry_name):
                 enriched["所处行业"] = metadata.get("industry_name")
             if not enriched.get("上市时间") and not enriched.get("list_date"):
                 enriched["上市时间"] = metadata.get("list_date")
@@ -570,8 +571,24 @@ class AkshareClient:
                     metadata[stock_code] = {"industry_name": board_name, "list_date": None}
                     continue
 
-                if not current.get("industry_name"):
+                current_industry_name = str(current.get("industry_name") or "").strip()
+                if (not current_industry_name) or self._is_generic_industry_name(current_industry_name):
                     current["industry_name"] = board_name
+
+    @staticmethod
+    def _is_generic_industry_name(industry_name: str) -> bool:
+        generic_prefixes = tuple(f"{prefix} " for prefix in "ABCDEFGHIJKLMNOPQRS")
+        if industry_name.startswith(generic_prefixes):
+            return True
+
+        return industry_name in {
+            "制造业",
+            "金融业",
+            "房地产业",
+            "建筑业",
+            "农林牧渔业",
+            "采矿业",
+        }
 
     @staticmethod
     def _extract_stock_code(row: dict[str, Any]) -> str:

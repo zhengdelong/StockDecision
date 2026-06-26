@@ -105,7 +105,8 @@ export interface FinancialItem {
   stockCode: string
   stockName: string
   industryName: string | null
-  reportDate: string
+  reportDate: string | null
+  totalScore: number | null
   pe: number | null
   pb: number | null
   roe: number | null
@@ -196,8 +197,10 @@ export interface IndustryQuery {
 }
 
 export interface FinancialQuery {
+  date?: string
+  snapshotVersion?: SnapshotVersion
   search?: string
-  sortBy?: 'roe' | 'revenue' | 'profit' | 'marketCap'
+  sortBy?: 'score' | 'roe' | 'revenue' | 'profit' | 'marketCap'
   minRoe?: number
   positiveGrowthOnly?: boolean
   page?: number

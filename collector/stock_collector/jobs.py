@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from stock_collector.akshare_client import AkshareClient
+from stock_collector.candidate_industry_backfill import backfill_candidate_industries
 from stock_collector.mysql_writer import MySqlSettings
 from stock_collector.mysql_writer import RawDataWriter
 from stock_collector.mysql_writer import create_in_memory_engine
@@ -70,6 +71,7 @@ def main() -> None:
             "sync-daily-missing",
             "sync-financials",
             "schedule-sync",
+            "backfill-candidate-industries",
         ],
         help="Job name to run",
     )
@@ -140,6 +142,16 @@ def main() -> None:
 
     if args.job == "schedule-sync":
         run_schedule_loop(orchestrator, once=args.once)
+        return
+
+    if args.job == "backfill-candidate-industries":
+        selected_trade_date = _parse_trade_date_arg(args.trade_date) or datetime.now(UTC).date()
+        result = backfill_candidate_industries(
+            orchestrator._writer,  # noqa: SLF001
+            trade_date=selected_trade_date,
+            snapshot_version="end_of_day_final",
+        )
+        print(json.dumps(result.__dict__, ensure_ascii=False, default=str))
 
 
 def print_result(result: Any) -> None:
@@ -248,7 +260,7 @@ def run_schedule_pass(
             continue
 
         try:
-            if stock_codes is None:
+            if job.action != "backfill-candidate-industries" and stock_codes is None:
                 stock_codes = writer.list_stock_codes()
                 if not stock_codes:
                     orchestrator.bootstrap_stocks()
@@ -296,6 +308,56 @@ def run_schedule_pass(
                     failure_count=0,
                     is_complete=all(item.is_complete for item in result),
                     is_signal_eligible=all(item.is_signal_eligible for item in result),
+                    error_message=None,
+                )
+                continue
+
+            if job.action == "backfill-candidate-industries":
+                result = backfill_candidate_industries(
+                    writer,
+                    trade_date=scheduled_at.date(),
+                    snapshot_version="end_of_day_final",
+                )
+                if not result.ready:
+                    outcomes.append(
+                        {
+                            "job": job.name,
+                            "status": "skipped",
+                            "reason": "candidate_snapshot_not_ready",
+                            "scheduled_at": scheduled_at,
+                            "started_at": now,
+                            "finished_at": now,
+                            "duration_seconds": 0.0,
+                            "evaluated_at": now,
+                        }
+                    )
+                    continue
+
+                finished_at = datetime.now(settings.timezone)
+                outcomes.append(
+                    {
+                        "job": job.name,
+                        "status": "executed",
+                        "repaired_count": result.repaired_count,
+                        "scanned_count": result.scanned_count,
+                        "updates": list(result.updates),
+                        "scheduled_at": scheduled_at,
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                        "duration_seconds": round((finished_at - started_at).total_seconds(), 3),
+                        "evaluated_at": now,
+                    }
+                )
+                _append_schedule_marker(
+                    writer,
+                    job=job,
+                    scheduled_at=scheduled_at,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    success_count=result.repaired_count,
+                    failure_count=0,
+                    is_complete=True,
+                    is_signal_eligible=True,
                     error_message=None,
                 )
                 continue
@@ -393,6 +455,24 @@ def load_scheduler_settings() -> SchedulerSettings:
                 run_time=_parse_time(_read_env("COLLECTOR_FINANCIAL_SYNC_TIME", default="21:00")),
                 run_iso_weekdays=_parse_iso_weekdays(
                     _read_env("COLLECTOR_FINANCIAL_SYNC_DAYS", default="7")
+                ),
+            ),
+            ScheduledCollectorJob(
+                name="backfill-candidate-industries",
+                action="backfill-candidate-industries",
+                target_scope="backfill-candidate-industries",
+                run_time=_parse_time(_read_env("COLLECTOR_CANDIDATE_INDUSTRY_BACKFILL_TIME", default="18:00")),
+                run_iso_weekdays=_parse_iso_weekdays(
+                    _read_env("COLLECTOR_CANDIDATE_INDUSTRY_BACKFILL_DAYS", default="1,2,3,4,5")
+                ),
+            ),
+            ScheduledCollectorJob(
+                name="backfill-candidate-industries-retry",
+                action="backfill-candidate-industries",
+                target_scope="backfill-candidate-industries-retry",
+                run_time=_parse_time(_read_env("COLLECTOR_CANDIDATE_INDUSTRY_BACKFILL_RETRY_TIME", default="18:35")),
+                run_iso_weekdays=_parse_iso_weekdays(
+                    _read_env("COLLECTOR_CANDIDATE_INDUSTRY_BACKFILL_DAYS", default="1,2,3,4,5")
                 ),
             ),
         ),

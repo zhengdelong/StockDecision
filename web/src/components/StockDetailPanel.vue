@@ -29,6 +29,7 @@ const props = defineProps<{
 }>()
 
 const recentBarsPreview = computed(() => props.stockDetail?.recentBars.slice(-5).reverse() ?? [])
+const headlineScore = computed(() => props.stockDetail?.candidate?.totalScore ?? props.stockDetail?.signal?.totalScore ?? null)
 
 const latestChangePct = computed(() => {
   const bars = props.stockDetail?.recentBars ?? []
@@ -219,9 +220,15 @@ const executionScenario = computed(() => {
 
     <template v-else-if="props.stockDetail">
       <header class="detail-header">
-        <div>
+        <div class="detail-header-main">
           <p class="eyebrow detail-code">{{ props.stockDetail.stockCode }}</p>
-          <h2>{{ props.stockDetail.stockName }}</h2>
+          <div class="detail-title-row">
+            <h2>{{ props.stockDetail.stockName }}</h2>
+            <div v-if="headlineScore != null" class="detail-score-badge">
+              <span>总分</span>
+              <strong>{{ formatNumber(headlineScore, 1) }}</strong>
+            </div>
+          </div>
           <p class="muted">{{ props.stockDetail.industryName ?? '未知行业' }}</p>
         </div>
         <div class="detail-badges">

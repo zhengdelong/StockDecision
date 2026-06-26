@@ -48,7 +48,7 @@ const menuGroups: MenuGroup[] = [
     title: '分析',
     items: [
       { key: 'industries', title: '行业强度', caption: '比较行业热度和信号密度' },
-      { key: 'financials', title: '财务质量', caption: '按基本面筛选公司' },
+      { key: 'financials', title: '全市场评分', caption: '查看所有股票的综合打分' },
       { key: 'strategy', title: '策略解释', caption: '用中文拆解评分和规则' },
       { key: 'learning', title: '学习复盘', caption: '沉淀交易经验' },
       { key: 'backtests', title: '回测验证', caption: '查看历史表现和回撤' },

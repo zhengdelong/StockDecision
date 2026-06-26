@@ -774,6 +774,40 @@ h2 {
   margin-bottom: 18px;
 }
 
+.detail-header-main {
+  min-width: 0;
+}
+
+.detail-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-score-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.92), rgba(236, 254, 255, 0.92));
+  color: #0f172a;
+}
+
+.detail-score-badge span {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.detail-score-badge strong {
+  font-size: 22px;
+  font-weight: 900;
+}
+
 .detail-code {
   margin-bottom: 6px;
 }
@@ -1386,6 +1420,10 @@ h2 {
   .workspace-head,
   .detail-header {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .detail-title-row {
     align-items: flex-start;
   }
 

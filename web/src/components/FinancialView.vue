@@ -13,6 +13,7 @@ const props = defineProps<{
   minRoe: number
   positiveGrowthOnly: boolean
   searchText: string
+  selectedStockCode: string
   sortMode: FinancialSortMode
   totalCount: number
   totalPages: number
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (event: 'update:sortMode', value: FinancialSortMode): void
   (event: 'apply'): void
   (event: 'move-page', step: number): void
+  (event: 'select-stock', stockCode: string): void
 }>()
 </script>
 
@@ -47,6 +49,7 @@ const emit = defineEmits<{
           type="number"
           min="0"
           max="100"
+          placeholder="0 = 不限"
           @input="emit('update:minRoe', Number(($event.target as HTMLInputElement).value))"
         />
       </label>
@@ -56,6 +59,7 @@ const emit = defineEmits<{
           :value="props.sortMode"
           @change="emit('update:sortMode', ($event.target as HTMLSelectElement).value as FinancialSortMode)"
         >
+          <option value="score">总分</option>
           <option value="roe">ROE</option>
           <option value="revenue">营收同比</option>
           <option value="profit">净利润同比</option>
@@ -76,6 +80,8 @@ const emit = defineEmits<{
       </div>
     </div>
 
+    <p class="field-hint">ROE 设为 0 时不做过滤，搜索可包含暂无 ROE 的股票。</p>
+
     <div v-if="props.financials.length" class="table-shell">
       <table class="data-table">
         <thead>
@@ -83,6 +89,7 @@ const emit = defineEmits<{
             <th>代码</th>
             <th>名称</th>
             <th>行业</th>
+            <th>评分</th>
             <th>报告期</th>
             <th>PE</th>
             <th>PB</th>
@@ -93,11 +100,27 @@ const emit = defineEmits<{
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in props.financials" :key="item.stockCode">
+          <tr
+            v-for="item in props.financials"
+            :key="item.stockCode"
+            :class="{ selected: props.selectedStockCode === item.stockCode }"
+            @click="emit('select-stock', item.stockCode)"
+          >
             <td>{{ item.stockCode }}</td>
             <td>{{ item.stockName }}</td>
             <td>{{ item.industryName ?? '-' }}</td>
-            <td>{{ item.reportDate }}</td>
+            <td>
+              <div class="candidate-score-cell">
+                <div class="candidate-score-head">
+                  <strong>{{ formatNumber(item.totalScore, 1) }}</strong>
+                  <span>{{ item.totalScore == null ? '暂无' : '总分' }}</span>
+                </div>
+                <div class="candidate-score-track">
+                  <div class="candidate-score-fill" :style="{ width: `${Math.min(item.totalScore ?? 0, 100)}%` }" />
+                </div>
+              </div>
+            </td>
+            <td>{{ item.reportDate ?? '-' }}</td>
             <td>{{ formatNumber(item.pe) }}</td>
             <td>{{ formatNumber(item.pb) }}</td>
             <td>{{ formatNumber(item.roe, 1) }}</td>

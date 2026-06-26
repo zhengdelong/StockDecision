@@ -51,7 +51,7 @@ import type {
 export type CandidateSortMode = 'score' | 'rr' | 'close'
 export type SignalSortMode = 'score' | 'rr' | 'capital'
 export type IndustrySortMode = 'strength' | 'rank' | 'candidates' | 'signals'
-export type FinancialSortMode = 'roe' | 'revenue' | 'profit' | 'marketCap'
+export type FinancialSortMode = 'score' | 'roe' | 'revenue' | 'profit' | 'marketCap'
 
 const pageSize = 10
 
@@ -81,7 +81,7 @@ export function useSignalDesk() {
   const isRunningBacktest = ref(false)
   const errorMessage = ref('')
   const minScore = ref(60)
-  const minRoe = ref(8)
+  const minRoe = ref(0)
   const onlyTradable = ref(false)
   const positiveGrowthOnly = ref(false)
   const searchText = ref('')
@@ -90,7 +90,7 @@ export function useSignalDesk() {
   const candidateSortMode = ref<CandidateSortMode>('score')
   const signalSortMode = ref<SignalSortMode>('score')
   const industrySortMode = ref<IndustrySortMode>('strength')
-  const financialSortMode = ref<FinancialSortMode>('roe')
+  const financialSortMode = ref<FinancialSortMode>('score')
   const candidatePageIndex = ref(1)
   const signalPageIndex = ref(1)
   const industryPageIndex = ref(1)
@@ -147,9 +147,11 @@ export function useSignalDesk() {
 
   function buildFinancialQuery(page: number): FinancialQuery {
     return {
+      date: selectedTradeDate.value || undefined,
+      snapshotVersion: selectedSnapshotVersion.value,
       search: searchText.value || undefined,
       sortBy: financialSortMode.value,
-      minRoe: minRoe.value,
+      minRoe: minRoe.value > 0 ? minRoe.value : undefined,
       positiveGrowthOnly: positiveGrowthOnly.value || undefined,
       page,
       pageSize,
@@ -229,7 +231,7 @@ export function useSignalDesk() {
         loadLearningOverview(),
       ])
 
-      const preferredCode = signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode
+      const preferredCode = signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode ?? financials.value[0]?.stockCode
       if (preferredCode) {
         await selectStock(preferredCode, false)
       } else {
@@ -310,9 +312,12 @@ export function useSignalDesk() {
       await Promise.all([loadCandidatePage(1), loadSignalPage(1), loadIndustryPage(1), loadFinancialPage(1)])
       const selectedCode = stockDetail.value?.stockCode
       const preferredCode =
-        selectedCode && (candidates.value.some((item) => item.stockCode === selectedCode) || signals.value.some((item) => item.stockCode === selectedCode))
+        selectedCode && (
+          candidates.value.some((item) => item.stockCode === selectedCode) ||
+          signals.value.some((item) => item.stockCode === selectedCode) ||
+          financials.value.some((item) => item.stockCode === selectedCode))
           ? selectedCode
-          : signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode
+          : signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode ?? financials.value[0]?.stockCode
 
       if (preferredCode) {
         await selectStock(preferredCode, false)

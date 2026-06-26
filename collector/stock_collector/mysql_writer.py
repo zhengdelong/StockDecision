@@ -309,6 +309,7 @@ class RawDataWriter:
 
         table = RAW_TABLES[table_name]
         normalized_rows = [self._normalize_row(table_name, row) for row in rows]
+        normalized_rows = self._deduplicate_rows(table_name, normalized_rows)
         with self._engine.begin() as connection:
             for row in normalized_rows:
                 delete_filters = self._build_delete_filters(table_name, table, row)
@@ -550,6 +551,40 @@ class RawDataWriter:
         if table_name == "raw_industry_daily_stats":
             return [table.c.industry_code == row["industry_code"], table.c.trade_date == row["trade_date"]]
         return []
+
+    @classmethod
+    def _deduplicate_rows(cls, table_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(rows) <= 1:
+            return rows
+
+        deduplicated_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+        ordered_keys: list[tuple[Any, ...]] = []
+        for row in rows:
+            identity = cls._build_row_identity(table_name, row)
+            if identity is None:
+                ordered_keys.append((id(row),))
+                deduplicated_by_key[(id(row),)] = row
+                continue
+
+            if identity not in deduplicated_by_key:
+                ordered_keys.append(identity)
+            deduplicated_by_key[identity] = row
+
+        return [deduplicated_by_key[key] for key in ordered_keys]
+
+    @staticmethod
+    def _build_row_identity(table_name: str, row: dict[str, Any]) -> tuple[Any, ...] | None:
+        if table_name == "raw_stocks":
+            return (row["batch_id"], row["stock_code"])
+        if table_name == "raw_daily_bars":
+            return (row["stock_code"], row["trade_date"], row["adjust_type"])
+        if table_name == "raw_financial_snapshots":
+            return (row["stock_code"], row["report_date"])
+        if table_name == "raw_market_index_bars":
+            return (row["index_code"], row["trade_date"])
+        if table_name == "raw_industry_daily_stats":
+            return (row["industry_code"], row["trade_date"])
+        return None
 
     @staticmethod
     def _normalize_row(table_name: str, row: dict[str, Any]) -> dict[str, Any]:

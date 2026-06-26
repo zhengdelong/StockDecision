@@ -29,7 +29,7 @@ const currentViewTitle = computed(() => {
     case 'signals': return '交易信号清单'
     case 'positions': return '模拟交易与持仓'
     case 'industries': return '行业强度看板'
-    case 'financials': return '财务质量看板'
+    case 'financials': return '全市场股票评分'
     case 'strategy': return '策略解释'
     case 'learning': return '学习复盘'
     case 'backtests': return '回测验证'
@@ -45,7 +45,7 @@ const currentViewSummary = computed(() => {
     case 'signals': return '聚焦可执行信号、建议仓位和风控价位，便于当天复核。'
     case 'positions': return '先做模拟买卖，再跟踪盈亏、止损止盈和历史流水。'
     case 'industries': return '横向比较行业热度、候选分布和信号集中度。'
-    case 'financials': return '按照 ROE、营收增速、利润增速和市值筛选基本面更稳的公司。'
+    case 'financials': return '查看全市场可评分股票的综合打分，并结合 PE、PB、ROE 和增长指标做横向比较。'
     case 'strategy': return '把评分逻辑、环境过滤和执行规则拆开讲清楚，便于学习。'
     case 'learning': return '把每次交易记录成复盘素材，沉淀成以后可重复使用的规则。'
     case 'backtests': return '用历史信号做同步回测，查看收益、回撤、盈亏比和样本明细。'
@@ -57,8 +57,8 @@ const currentViewSummary = computed(() => {
 
 const overviewHiddenViews = ['system', 'tasks', 'financials', 'strategy', 'learning', 'backtests', 'positions']
 const showsOverviewCards = computed(() => !overviewHiddenViews.includes(activeView.value))
-const showsDetailPanel = computed(() => ['dashboard', 'candidates', 'signals', 'learning'].includes(activeView.value))
-const usesDetailDrawer = computed(() => ['candidates', 'signals'].includes(activeView.value))
+const showsDetailPanel = computed(() => ['dashboard', 'candidates', 'signals', 'financials', 'learning'].includes(activeView.value))
+const usesDetailDrawer = computed(() => ['candidates', 'signals', 'financials'].includes(activeView.value))
 const showsDockedDetailPanel = computed(() => showsDetailPanel.value && !usesDetailDrawer.value)
 const showsDetailDrawer = computed(() => showsDetailPanel.value && usesDetailDrawer.value)
 const isDetailDrawerOpen = ref(false)
@@ -73,6 +73,7 @@ const detailSummary = computed(() => {
     stockCode: detail.stockCode,
     stockName: detail.stockName,
     industryName: detail.industryName ?? '未分类行业',
+    totalScore: detail.candidate?.totalScore ?? detail.signal?.totalScore ?? null,
     tradeDate: detail.tradeDate,
     snapshotVersionName: detail.snapshotVersionName,
   }
@@ -96,7 +97,7 @@ function closeDetailDrawer() {
 }
 
 watch(activeView, (view) => {
-  if (!['candidates', 'signals'].includes(view)) {
+  if (!['candidates', 'signals', 'financials'].includes(view)) {
     isDetailDrawerOpen.value = false
   }
 })
@@ -156,7 +157,11 @@ watch(
                 <p class="card-label">个股详情交互</p>
                 <template v-if="detailSummary">
                   <strong>{{ detailSummary.stockName }} · {{ detailSummary.stockCode }}</strong>
-                  <span>{{ detailSummary.industryName }} · {{ detailSummary.tradeDate }} · {{ detailSummary.snapshotVersionName }}</span>
+                  <span>
+                    {{ detailSummary.industryName }}
+                    <template v-if="detailSummary.totalScore != null"> · 总分 {{ detailSummary.totalScore.toFixed(1) }}</template>
+                    · {{ detailSummary.tradeDate }} · {{ detailSummary.snapshotVersionName }}
+                  </span>
                 </template>
                 <template v-else>
                   <strong>列表优先，详情按需展开</strong>
@@ -261,11 +266,13 @@ watch(
               :min-roe="desk.minRoe.value"
               :positive-growth-only="desk.positiveGrowthOnly.value"
               :search-text="desk.searchText.value"
+              :selected-stock-code="selectedStockCode"
               :sort-mode="desk.financialSortMode.value"
               :total-count="desk.financialTotalCount.value"
               :total-pages="desk.totalFinancialPages.value"
               @apply="desk.applyFilters"
               @move-page="desk.moveFinancialPage"
+              @select-stock="handleSelectStock"
               @update:min-roe="desk.minRoe.value = $event"
               @update:positive-growth-only="desk.positiveGrowthOnly.value = $event"
               @update:search-text="desk.searchText.value = $event"
@@ -329,7 +336,9 @@ watch(
                   <p class="card-label">个股详情</p>
                   <h3 v-if="detailSummary">{{ detailSummary.stockName }} · {{ detailSummary.stockCode }}</h3>
                   <p v-if="detailSummary" class="muted">
-                    {{ detailSummary.industryName }} · {{ detailSummary.tradeDate }} · {{ detailSummary.snapshotVersionName }}
+                    {{ detailSummary.industryName }}
+                    <template v-if="detailSummary.totalScore != null"> · 总分 {{ detailSummary.totalScore.toFixed(1) }}</template>
+                    · {{ detailSummary.tradeDate }} · {{ detailSummary.snapshotVersionName }}
                   </p>
                   <p v-else class="muted">正在加载个股详情...</p>
                 </div>

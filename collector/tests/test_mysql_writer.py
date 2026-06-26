@@ -11,6 +11,7 @@ from stock_collector.mysql_writer import create_in_memory_engine
 from stock_collector.mysql_writer import data_ingestion_logs_table
 from stock_collector.mysql_writer import latest_raw_stocks_table
 from stock_collector.mysql_writer import raw_daily_bars_table
+from stock_collector.mysql_writer import raw_stocks_table
 
 
 def test_raw_data_writer_creates_tables_with_new_columns() -> None:
@@ -460,6 +461,76 @@ def test_update_stock_metadata_updates_latest_raw_stocks_too() -> None:
 
     assert latest_row["industry_name"] == "银行"
     assert latest_row["list_date"] == date(1999, 11, 10)
+
+
+def test_raw_data_writer_deduplicates_raw_stocks_within_same_batch() -> None:
+    writer = RawDataWriter(create_in_memory_engine())
+    writer.create_tables()
+
+    fetched_at = datetime(2026, 6, 25, 15, 30, tzinfo=UTC)
+    written = writer.upsert_rows(
+        "raw_stocks",
+        [
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "market": "SZ",
+                "industry_name": "C 制造业",
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch1",
+                "payload_hash": "hash1",
+                "raw_payload": {"industry_name": "C 制造业"},
+                "created_at": fetched_at,
+            },
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "market": "SZ",
+                "industry_name": "化学制品",
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch1",
+                "payload_hash": "hash2",
+                "raw_payload": {"industry_name": "化学制品"},
+                "created_at": fetched_at,
+            },
+        ],
+    )
+
+    assert written == 1
+
+    with writer.engine.connect() as connection:
+        raw_rows = connection.execute(
+            select(
+                raw_stocks_table.c.stock_code,
+                raw_stocks_table.c.industry_name,
+                raw_stocks_table.c.payload_hash,
+            ).where(raw_stocks_table.c.stock_code == "002317")
+        ).mappings().all()
+        latest_row = connection.execute(
+            select(
+                latest_raw_stocks_table.c.stock_code,
+                latest_raw_stocks_table.c.industry_name,
+                latest_raw_stocks_table.c.batch_id,
+            ).where(latest_raw_stocks_table.c.stock_code == "002317")
+        ).mappings().one()
+
+    assert len(raw_rows) == 1
+    assert raw_rows[0]["industry_name"] == "化学制品"
+    assert raw_rows[0]["payload_hash"] == "hash2"
+    assert latest_row["industry_name"] == "化学制品"
+    assert latest_row["batch_id"] == "batch1"
 
 
 def test_raw_data_writer_reports_trade_date_not_fully_collected_when_one_scope_missing() -> None:
