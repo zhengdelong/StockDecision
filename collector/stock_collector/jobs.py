@@ -219,7 +219,9 @@ def run_schedule_pass(
             second=0,
             microsecond=0,
         )
-        if writer.has_log_since(job.target_scope, created_at_or_after=scheduled_at):
+        # data_ingestion_logs.created_at 由采集侧按 UTC 写入；调度判重也必须先对齐到 UTC，
+        # 否则会把“今天 16:30 本地时间已执行过”的记录误判为“还没跑过”，从而重复触发。
+        if writer.has_log_since(job.target_scope, created_at_or_after=scheduled_at.astimezone(UTC)):
             continue
         latest_trade_date = writer.get_latest_trade_date() if job.skip_when_trade_date_current else None
         if (

@@ -31,6 +31,18 @@ function submit() {
     maxHoldingDays: form.maxHoldingDays,
   })
 }
+
+function formatExitLabel(hitStopLoss: boolean, hitTarget: boolean) {
+  if (hitStopLoss) {
+    return '止损退出'
+  }
+
+  if (hitTarget) {
+    return '止盈退出'
+  }
+
+  return '到期退出'
+}
 </script>
 
 <template>
@@ -39,7 +51,7 @@ function submit() {
       <div class="panel-head">
         <div>
           <p class="card-label">执行回测</p>
-          <h3>用历史结果先验证，再决定是否采用</h3>
+          <h3>先用历史数据验证策略，再决定是否采用</h3>
         </div>
       </div>
 
@@ -64,14 +76,14 @@ function submit() {
           {{ isRunning ? '回测执行中...' : '开始回测' }}
         </button>
       </div>
-      <p class="workspace-copy">当前回测版本：{{ snapshotVersion }}。建议先从最近一段区间开始验证，再逐步拉长时间范围。</p>
+      <p class="workspace-copy">当前回测快照版本：{{ snapshotVersion }}。建议先验证近一段区间，再逐步拉长时间范围。</p>
     </article>
 
     <article class="panel-card">
       <div class="panel-head">
         <div>
           <p class="card-label">历史回测</p>
-          <h3>最近跑过的回测列表</h3>
+          <h3>最近执行过的回测记录</h3>
         </div>
       </div>
 
@@ -115,7 +127,7 @@ function submit() {
       <div class="panel-head">
         <div>
           <p class="card-label">回测详情</p>
-          <h3>把收益、回撤和样本拆开看</h3>
+          <h3>拆开看收益、回撤和交易明细</h3>
         </div>
       </div>
 
@@ -133,7 +145,7 @@ function submit() {
         <div><span>平均持有天数</span><strong>{{ formatNumber(selectedRun.averageHoldingDays) }}</strong></div>
         <div><span>生成时间</span><strong>{{ formatDateTime(selectedRun.createdAtUtc) }}</strong></div>
       </div>
-      <div v-else class="empty-state">先执行一次回测，或从上面的历史回测里点开一条结果。</div>
+      <div v-else class="empty-state">先执行一次回测，或从上面的历史回测里打开一条结果。</div>
 
       <div v-if="selectedRun?.trades?.length" class="table-shell" style="margin-top: 16px;">
         <table class="data-table">
@@ -145,9 +157,13 @@ function submit() {
               <th>策略</th>
               <th>入场价</th>
               <th>出场价</th>
+              <th>股数</th>
+              <th>投入资金</th>
+              <th>收益额</th>
               <th>收益率</th>
               <th>最大盈利</th>
               <th>最大回撤</th>
+              <th>持有天数</th>
               <th>退出类型</th>
             </tr>
           </thead>
@@ -159,10 +175,14 @@ function submit() {
               <td>{{ trade.strategyType }}</td>
               <td>{{ formatNumber(trade.entryPrice) }}</td>
               <td>{{ formatNumber(trade.exitPrice) }}</td>
+              <td>{{ trade.quantity }}</td>
+              <td>{{ formatNumber(trade.investedCapital) }}</td>
+              <td>{{ formatNumber(trade.profitAmount) }}</td>
               <td>{{ formatPercent(trade.returnPct) }}</td>
               <td>{{ formatPercent(trade.maxGainPct) }}</td>
               <td>{{ formatPercent(trade.maxDrawdownPct) }}</td>
-              <td>{{ trade.hitStopLoss ? '止损' : trade.hitTarget ? '止盈' : '到期退出' }}</td>
+              <td>{{ trade.maxHoldingDays }}</td>
+              <td>{{ formatExitLabel(trade.hitStopLoss, trade.hitTarget) }}</td>
             </tr>
           </tbody>
         </table>

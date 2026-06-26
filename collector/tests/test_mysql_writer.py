@@ -9,6 +9,7 @@ from stock_collector.mysql_writer import RawDataWriter
 from stock_collector.mysql_writer import collector_checkpoints_table
 from stock_collector.mysql_writer import create_in_memory_engine
 from stock_collector.mysql_writer import data_ingestion_logs_table
+from stock_collector.mysql_writer import latest_raw_stocks_table
 from stock_collector.mysql_writer import raw_daily_bars_table
 
 
@@ -399,6 +400,61 @@ def test_raw_data_writer_detects_logs_since_timestamp() -> None:
 
     assert writer.has_log_since("sync-daily-bars", created_at_or_after=datetime(2026, 6, 17, 0, tzinfo=UTC)) is True
     assert writer.has_log_since("sync-daily-bars", created_at_or_after=datetime(2026, 6, 18, 0, tzinfo=UTC)) is False
+
+
+def test_update_stock_metadata_updates_latest_raw_stocks_too() -> None:
+    writer = RawDataWriter(create_in_memory_engine())
+    writer.create_tables()
+
+    fetched_at = datetime(2026, 6, 25, 15, 30, tzinfo=UTC)
+    writer.upsert_rows(
+        "raw_stocks",
+        [
+            {
+                "stock_code": "600000",
+                "stock_name": "浦发银行",
+                "market": "SH",
+                "industry_name": None,
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch1",
+                "payload_hash": "hash1",
+                "raw_payload": None,
+                "created_at": fetched_at,
+            }
+        ],
+    )
+
+    updated = writer.update_stock_metadata(
+        "batch1",
+        [
+            {
+                "stock_code": "600000",
+                "stock_name": "浦发银行",
+                "industry_name": "银行",
+                "list_date": date(1999, 11, 10),
+            }
+        ],
+    )
+
+    assert updated == 1
+
+    with writer.engine.connect() as connection:
+        latest_row = connection.execute(
+            select(
+                latest_raw_stocks_table.c.stock_code,
+                latest_raw_stocks_table.c.industry_name,
+                latest_raw_stocks_table.c.list_date,
+            ).where(latest_raw_stocks_table.c.stock_code == "600000")
+        ).mappings().one()
+
+    assert latest_row["industry_name"] == "银行"
+    assert latest_row["list_date"] == date(1999, 11, 10)
 
 
 def test_raw_data_writer_reports_trade_date_not_fully_collected_when_one_scope_missing() -> None:

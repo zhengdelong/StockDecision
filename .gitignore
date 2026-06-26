@@ -12,3 +12,4 @@ collector/stock_collector.egg-info/
 *.user
 *.suo
 .idea/
+tmp/

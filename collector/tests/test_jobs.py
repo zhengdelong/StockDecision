@@ -379,6 +379,32 @@ def test_schedule_pass_marks_scope_as_logged_after_execution() -> None:
     assert second_outcomes == []
 
 
+def test_schedule_pass_uses_utc_threshold_when_checking_schedule_marker() -> None:
+    orchestrator = FakeOrchestrator()
+    orchestrator._writer.logged_scopes = {
+        "sync-end-of-day-final-bars": [datetime(2026, 6, 25, 10, 35, tzinfo=UTC)],
+    }
+    settings = SchedulerSettings(
+        timezone=ZoneInfo("Asia/Shanghai"),
+        poll_interval_seconds=60,
+        jobs=(
+            ScheduledCollectorJob(
+                name="sync-end-of-day-final",
+                action="sync-daily",
+                target_scope="sync-end-of-day-final-bars",
+                run_time=time(16, 30),
+                run_iso_weekdays={4},
+            ),
+        ),
+    )
+
+    now = datetime(2026, 6, 25, 18, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    outcomes = run_schedule_pass(orchestrator, settings=settings, now=now)
+
+    assert outcomes == []
+    assert "job" not in orchestrator.called_with
+
+
 def test_schedule_pass_skips_retry_job_when_trade_date_is_current() -> None:
     orchestrator = FakeOrchestrator()
 

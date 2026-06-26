@@ -302,6 +302,10 @@ export interface BacktestTradeItem {
   maxDrawdownPct: number
   hitTarget: boolean
   hitStopLoss: boolean
+  quantity: number
+  investedCapital: number
+  profitAmount: number
+  maxHoldingDays: number
 }
 
 export interface BacktestOverviewResponse {

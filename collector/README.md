@@ -74,8 +74,6 @@ The collector reads these variables from Compose and `.env`:
 - `MYSQL_PASSWORD`
 - `COLLECTOR_TIMEZONE`
 - `COLLECTOR_SCHEDULER_POLL_SECONDS`
-- `COLLECTOR_INTRADAY_SYNC_TIME`
-- `COLLECTOR_INTRADAY_SYNC_DAYS`
 - `COLLECTOR_NIGHT_SYNC_TIME`
 - `COLLECTOR_NIGHT_SYNC_DAYS`
 - `COLLECTOR_RETRY_SYNC_TIME`
@@ -118,7 +116,6 @@ has already logged a run for the current day.
 
 Default schedules:
 
-- `sync-daily` intraday at `11:30` on ISO weekdays `1,2,3,4,5`
 - `sync-daily` first end-of-day run at `16:30` on ISO weekdays `1,2,3,4,5`
 - `sync-daily` retry run at `18:30` on ISO weekdays `1,2,3,4,5`
 - `sync-financials` at `21:00` on ISO weekday `7`
@@ -127,7 +124,6 @@ Current timetable in `Asia/Shanghai`:
 
 | Job | Data scope | Schedule |
 | --- | --- | --- |
-| `sync-daily-intraday` | `raw_stocks`, `raw_daily_bars`, `raw_market_index_bars`, `raw_industry_daily_stats` | Monday-Friday `11:30` |
 | `sync-daily-night` | `raw_stocks`, `raw_daily_bars`, `raw_market_index_bars`, `raw_industry_daily_stats` | Monday-Friday `16:30` |
 | `sync-daily-retry` | `raw_stocks`, `raw_daily_bars`, `raw_market_index_bars`, `raw_industry_daily_stats` | Monday-Friday `18:30` |
 | `sync-financials` | `raw_financial_snapshots` | Sunday `21:00` |

@@ -312,6 +312,11 @@ public sealed class SellSimulatedPositionUseCase(
 public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, IBacktestRunRepository backtestRunRepository)
 {
     private const string StrategyVersion = "a-share-20k-v1";
+    private const decimal InitialAccountCapital = 20_000m;
+    private const decimal PreferredPositionCapital = 10_000m;
+    private const decimal MinimumPositionCapital = 6_000m;
+    private const decimal MaximumLossPerTrade = 400m;
+    private const int LotSize = 100;
     private const decimal BuySlippageRate = 0.001m;
     private const decimal SellSlippageRate = 0.001m;
     private const decimal CommissionRate = 0.0003m;
@@ -342,8 +347,8 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
 
         var trades = new List<BacktestTradeItemResponse>();
         var equityCurve = new List<BacktestEquityPointResponse>();
-        var equity = 100m;
-        var peakEquity = 100m;
+        var accountCapital = InitialAccountCapital;
+        var peakAccountCapital = InitialAccountCapital;
         var maxDrawdownPct = 0m;
 
         // 回测直接按用户选择的区间扫描已有信号，不再额外跳过前 120 个交易日。
@@ -359,18 +364,21 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                     continue;
                 }
 
-                var trade = SimulateTrade(signal, forwardBars);
-                if (trade is null)
+                var simulation = SimulateTrade(signal, forwardBars, accountCapital);
+                if (simulation is null)
                 {
                     continue;
                 }
 
-                trades.Add(trade);
-                equity *= 1m + trade.ReturnPct / 100m;
-                peakEquity = Math.Max(peakEquity, equity);
-                var currentDrawdownPct = peakEquity == 0m ? 0m : (equity - peakEquity) / peakEquity * 100m;
+                trades.Add(simulation.Trade);
+                accountCapital = Math.Round(accountCapital + simulation.ProfitAmount, 2, MidpointRounding.AwayFromZero);
+                peakAccountCapital = Math.Max(peakAccountCapital, accountCapital);
+                var currentDrawdownPct = peakAccountCapital == 0m ? 0m : (accountCapital - peakAccountCapital) / peakAccountCapital * 100m;
                 maxDrawdownPct = Math.Min(maxDrawdownPct, currentDrawdownPct);
-                equityCurve.Add(new BacktestEquityPointResponse(trade.TradeDate, Math.Round(equity, 4, MidpointRounding.AwayFromZero), Math.Round((equity - 100m) / 100m * 100m, 2, MidpointRounding.AwayFromZero)));
+                equityCurve.Add(new BacktestEquityPointResponse(
+                    simulation.Trade.TradeDate,
+                    accountCapital,
+                    Math.Round((accountCapital - InitialAccountCapital) / InitialAccountCapital * 100m, 2, MidpointRounding.AwayFromZero)));
             }
         }
 
@@ -379,7 +387,10 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
             throw new InvalidOperationException("当前回测区间内没有可回放的交易样本，请扩大日期范围，或等待更多交易日信号与后续日线数据。");
         }
 
-        var detail = BuildBacktestDetail(0, request.StartDate, request.EndDate, snapshotVersion, trades, equityCurve, maxDrawdownPct, DateTime.UtcNow);
+        var averageHoldingDays = trades.Count == 0
+            ? 0m
+            : Math.Round(trades.Average(static item => (decimal)item.MaxHoldingDays), 2, MidpointRounding.AwayFromZero);
+        var detail = BuildBacktestDetail(0, request.StartDate, request.EndDate, snapshotVersion, trades, equityCurve, maxDrawdownPct, averageHoldingDays, DateTime.UtcNow);
         var runId = await backtestRunRepository.AddRunAsync(
             new BacktestRunDraft(
                 StrategyVersion,
@@ -432,6 +443,7 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         IReadOnlyList<BacktestTradeItemResponse> trades,
         IReadOnlyList<BacktestEquityPointResponse> equityCurve,
         decimal maxDrawdownPct,
+        decimal averageHoldingDays,
         DateTime createdAtUtc)
     {
         if (trades.Count == 0)
@@ -450,7 +462,7 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
                 0m,
                 0m,
                 0m,
-                0m,
+                averageHoldingDays,
                 createdAtUtc,
                 [],
                 []);
@@ -476,7 +488,7 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
             Math.Round(ratio, 2, MidpointRounding.AwayFromZero),
             Math.Round(Math.Abs(maxDrawdownPct), 2, MidpointRounding.AwayFromZero),
             Math.Round(equityCurve.LastOrDefault()?.ReturnPct ?? 0m, 2, MidpointRounding.AwayFromZero),
-            5m,
+            averageHoldingDays,
             createdAtUtc,
             equityCurve,
             trades.OrderByDescending(static item => item.TradeDate).ThenBy(static item => item.StockCode).ToList());
@@ -485,7 +497,7 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
     /// <summary>
     /// 用保守顺序模拟单笔交易，优先判定止损。
     /// </summary>
-    internal static BacktestTradeItemResponse? SimulateTrade(TradeSignal signal, IReadOnlyList<DailyBar> forwardBars)
+    internal static BacktestSimulationResult? SimulateTrade(TradeSignal signal, IReadOnlyList<DailyBar> forwardBars, decimal accountCapital)
     {
         var firstBar = forwardBars[0];
         if (ShouldSkipByGapOpen(signal, firstBar))
@@ -494,18 +506,27 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         }
 
         var entryPrice = Math.Round(firstBar.Open * (1m + BuySlippageRate), 4, MidpointRounding.AwayFromZero);
+        var positionPlan = BuildPositionPlan(signal, entryPrice, accountCapital);
+        if (positionPlan is null)
+        {
+            return null;
+        }
+
         var exitPrice = forwardBars[^1].Close;
         var hitTarget = false;
         var hitStopLoss = false;
         var maxGainPct = decimal.MinValue;
         var maxDrawdownPct = decimal.MaxValue;
+        var holdingDays = 0;
 
-        foreach (var bar in forwardBars)
+        for (var index = 0; index < forwardBars.Count; index++)
         {
+            var bar = forwardBars[index];
             var gainPct = entryPrice == 0m ? 0m : (bar.High - entryPrice) / entryPrice * 100m;
             var drawdownPct = entryPrice == 0m ? 0m : (bar.Low - entryPrice) / entryPrice * 100m;
             maxGainPct = Math.Max(maxGainPct, gainPct);
             maxDrawdownPct = Math.Min(maxDrawdownPct, drawdownPct);
+            holdingDays = index + 1;
 
             if (bar.Low <= signal.StopLossPrice)
             {
@@ -525,27 +546,74 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         }
 
         var adjustedExitPrice = Math.Round(exitPrice * (1m - SellSlippageRate), 4, MidpointRounding.AwayFromZero);
-        var grossBuyAmount = entryPrice * Math.Max(signal.EstimatedShares, 0);
-        var grossSellAmount = adjustedExitPrice * Math.Max(signal.EstimatedShares, 0);
+        var grossBuyAmount = entryPrice * positionPlan.Quantity;
+        var grossSellAmount = adjustedExitPrice * positionPlan.Quantity;
         var buyCommission = CalculateCommission(grossBuyAmount);
         var sellCommission = CalculateCommission(grossSellAmount);
         var stampDuty = grossSellAmount * StampDutyRate;
         var netBuyAmount = grossBuyAmount + buyCommission;
         var netSellAmount = grossSellAmount - sellCommission - stampDuty;
+        var profitAmount = netSellAmount - netBuyAmount;
         var returnPct = netBuyAmount == 0m ? 0m : (netSellAmount - netBuyAmount) / netBuyAmount * 100m;
 
-        return new BacktestTradeItemResponse(
-            signal.TradeDate,
-            signal.StockCode,
-            signal.StockName,
-            MarketResponseMapper.FormatStrategyType(signal.StrategyType),
-            entryPrice,
-            adjustedExitPrice,
-            Math.Round(returnPct, 2, MidpointRounding.AwayFromZero),
-            Math.Round(maxGainPct == decimal.MinValue ? 0m : maxGainPct, 2, MidpointRounding.AwayFromZero),
-            Math.Round(maxDrawdownPct == decimal.MaxValue ? 0m : maxDrawdownPct, 2, MidpointRounding.AwayFromZero),
-            hitTarget,
-            hitStopLoss);
+        return new BacktestSimulationResult(
+            new BacktestTradeItemResponse(
+                signal.TradeDate,
+                signal.StockCode,
+                signal.StockName,
+                MarketResponseMapper.FormatStrategyType(signal.StrategyType),
+                entryPrice,
+                adjustedExitPrice,
+                Math.Round(returnPct, 2, MidpointRounding.AwayFromZero),
+                Math.Round(maxGainPct == decimal.MinValue ? 0m : maxGainPct, 2, MidpointRounding.AwayFromZero),
+                Math.Round(maxDrawdownPct == decimal.MaxValue ? 0m : maxDrawdownPct, 2, MidpointRounding.AwayFromZero),
+                hitTarget,
+                hitStopLoss,
+                positionPlan.Quantity,
+                Math.Round(netBuyAmount, 2, MidpointRounding.AwayFromZero),
+                Math.Round(profitAmount, 2, MidpointRounding.AwayFromZero),
+                holdingDays),
+            Math.Round(profitAmount, 2, MidpointRounding.AwayFromZero));
+    }
+
+    /// <summary>
+    /// 按 2 万元账户、100 股整数手和单笔最大亏损规则生成仓位计划。
+    /// </summary>
+    private static BacktestPositionPlan? BuildPositionPlan(TradeSignal signal, decimal entryPrice, decimal accountCapital)
+    {
+        if (entryPrice <= 0m || signal.StopLossPrice <= 0m || signal.StopLossPrice >= entryPrice || accountCapital < MinimumPositionCapital)
+        {
+            return null;
+        }
+
+        var suggestedCapital = signal.SuggestedCapital <= 0m ? PreferredPositionCapital : signal.SuggestedCapital;
+        var targetCapital = Math.Min(accountCapital, Math.Min(PreferredPositionCapital, Math.Max(suggestedCapital, MinimumPositionCapital)));
+        if (targetCapital < MinimumPositionCapital)
+        {
+            return null;
+        }
+
+        var riskPerShare = entryPrice - signal.StopLossPrice;
+        if (riskPerShare <= 0m)
+        {
+            return null;
+        }
+
+        var maxSharesByCapital = (int)Math.Floor(targetCapital / entryPrice / LotSize) * LotSize;
+        var maxSharesByRisk = (int)Math.Floor(MaximumLossPerTrade / riskPerShare / LotSize) * LotSize;
+        var plannedShares = Math.Min(maxSharesByCapital, maxSharesByRisk);
+        if (plannedShares < LotSize)
+        {
+            return null;
+        }
+
+        var plannedCapital = Math.Round(entryPrice * plannedShares + CalculateCommission(entryPrice * plannedShares), 2, MidpointRounding.AwayFromZero);
+        if (plannedCapital < MinimumPositionCapital || plannedCapital > accountCapital)
+        {
+            return null;
+        }
+
+        return new BacktestPositionPlan(plannedShares, plannedCapital);
     }
 
     private static decimal CalculateCommission(decimal amount)
@@ -569,6 +637,10 @@ public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, I
         var maxGapPct = signal.StrategyType is StrategyType.PullbackToMa20 or StrategyType.WatchPullback ? 2m : 3m;
         return gapOpenPct > maxGapPct;
     }
+
+    internal sealed record BacktestPositionPlan(int Quantity, decimal PlannedCapital);
+
+    internal sealed record BacktestSimulationResult(BacktestTradeItemResponse Trade, decimal ProfitAmount);
 }
 
 /// <summary>

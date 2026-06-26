@@ -18,6 +18,11 @@ interface MenuItem {
   caption: string
 }
 
+interface MenuGroup {
+  title: string
+  items: MenuItem[]
+}
+
 const props = defineProps<{
   activeView: ViewMode
   candidateCount: number
@@ -29,18 +34,33 @@ const emit = defineEmits<{
   (event: 'change-view', view: ViewMode): void
 }>()
 
-const menuItems: MenuItem[] = [
-  { key: 'dashboard', title: '工作台', caption: '查看全局快照和收盘后的决策入口' },
-  { key: 'candidates', title: '候选池', caption: '筛选并排序值得继续观察的股票' },
-  { key: 'signals', title: '交易信号', caption: '查看可执行信号、仓位建议和风控价位' },
-  { key: 'positions', title: '模拟持仓', caption: '记录模拟买卖、盈亏变化和交易流水' },
-  { key: 'industries', title: '行业强度', caption: '比较行业热度、候选数量和信号密度' },
-  { key: 'financials', title: '财务质量', caption: '从盈利能力和成长质量筛选基本面' },
-  { key: 'strategy', title: '策略解释', caption: '用中文解释评分、过滤和执行规则' },
-  { key: 'learning', title: '学习复盘', caption: '记录交易反思，把经验沉淀成可复用规则' },
-  { key: 'backtests', title: '回测验证', caption: '运行历史回测并查看收益、回撤和样本明细' },
-  { key: 'tasks', title: '任务中心', caption: '查看采集、同步和快照任务是否按计划运行' },
-  { key: 'system', title: '系统状态', caption: '查看 API、策略版本和当前引用文档' },
+const menuGroups: MenuGroup[] = [
+  {
+    title: '主线',
+    items: [
+      { key: 'dashboard', title: '工作台', caption: '收盘总览和核心状态' },
+      { key: 'candidates', title: '候选池', caption: '筛选值得继续观察的股票' },
+      { key: 'signals', title: '交易信号', caption: '查看可执行信号和风控价位' },
+      { key: 'positions', title: '模拟持仓', caption: '记录买卖和盈亏变化' },
+    ],
+  },
+  {
+    title: '分析',
+    items: [
+      { key: 'industries', title: '行业强度', caption: '比较行业热度和信号密度' },
+      { key: 'financials', title: '财务质量', caption: '按基本面筛选公司' },
+      { key: 'strategy', title: '策略解释', caption: '用中文拆解评分和规则' },
+      { key: 'learning', title: '学习复盘', caption: '沉淀交易经验' },
+      { key: 'backtests', title: '回测验证', caption: '查看历史表现和回撤' },
+    ],
+  },
+  {
+    title: '管理',
+    items: [
+      { key: 'tasks', title: '任务中心', caption: '查看采集和同步任务' },
+      { key: 'system', title: '系统状态', caption: '查看接口健康和版本' },
+    ],
+  },
 ]
 </script>
 
@@ -49,30 +69,31 @@ const menuItems: MenuItem[] = [
     <div class="sidebar-brand">
       <p class="sidebar-eyebrow">A 股决策台</p>
       <h1>StockDecision</h1>
-      <p class="sidebar-copy">
-        把收盘后的候选筛选、交易信号、模拟持仓、回测验证、行业与财务分析放在同一个工作台里。
-      </p>
+      <p class="sidebar-copy">把收盘后的选股、信号、复盘和回测放在同一个工作台里。</p>
     </div>
 
-    <nav class="sidebar-menu" aria-label="主菜单">
-      <button
-        v-for="item in menuItems"
-        :key="item.key"
-        :class="['menu-button', { active: props.activeView === item.key }]"
-        @click="emit('change-view', item.key)"
-      >
-        <strong>{{ item.title }}</strong>
-        <span>{{ item.caption }}</span>
-      </button>
-    </nav>
-
     <section class="sidebar-status">
-      <p class="sidebar-label">当前快照</p>
+      <p class="sidebar-label">当前概览</p>
       <dl>
         <div><dt>交易日</dt><dd>{{ props.tradeDate }}</dd></div>
         <div><dt>候选池</dt><dd>{{ props.candidateCount }}</dd></div>
         <div><dt>信号数</dt><dd>{{ props.signalCount }}</dd></div>
       </dl>
     </section>
+
+    <nav class="sidebar-menu" aria-label="主菜单">
+      <section v-for="group in menuGroups" :key="group.title" class="sidebar-group">
+        <p class="sidebar-group-title">{{ group.title }}</p>
+        <button
+          v-for="item in group.items"
+          :key="item.key"
+          :class="['menu-button', { active: props.activeView === item.key }]"
+          @click="emit('change-view', item.key)"
+        >
+          <strong>{{ item.title }}</strong>
+          <span>{{ item.caption }}</span>
+        </button>
+      </section>
+    </nav>
   </aside>
 </template>

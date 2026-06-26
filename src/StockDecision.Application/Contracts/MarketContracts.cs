@@ -948,4 +948,8 @@ public sealed record BacktestTradeItemResponse(
     decimal MaxGainPct,
     decimal MaxDrawdownPct,
     bool HitTarget,
-    bool HitStopLoss);
+    bool HitStopLoss,
+    int Quantity,
+    decimal InvestedCapital,
+    decimal ProfitAmount,
+    int MaxHoldingDays);

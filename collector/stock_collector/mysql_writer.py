@@ -497,6 +497,18 @@ class RawDataWriter:
                     )
                 )
                 updated += int(result.rowcount or 0)
+
+                # 股票元数据补录后，要同步刷新 latest_raw_stocks，
+                # 否则领域层 fast path 会继续读到旧的空行业值。
+                connection.execute(
+                    update(latest_raw_stocks_table)
+                    .where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
+                    .values(
+                        stock_name=row.get("stock_name"),
+                        industry_name=row.get("industry_name"),
+                        list_date=row.get("list_date"),
+                    )
+                )
         return updated
 
     def acquire_advisory_lock(self, lock_name: str, *, timeout_seconds: int = 0) -> bool:

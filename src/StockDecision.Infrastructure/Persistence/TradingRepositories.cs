@@ -288,7 +288,11 @@ public sealed class EfBacktestRunRepository(StockDecisionDbContext dbContext) : 
                 item.MaxGainPct,
                 item.MaxDrawdownPct,
                 item.HitTarget,
-                item.HitStopLoss))
+                item.HitStopLoss,
+                0,
+                0m,
+                0m,
+                0))
             .ToListAsync(cancellationToken);
 
         var equityCurve = await dbContext.BacktestEquityPoints

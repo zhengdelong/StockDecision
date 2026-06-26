@@ -96,6 +96,20 @@ h2 {
   gap: 10px;
 }
 
+.sidebar-group {
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar-group-title {
+  margin: 6px 4px 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .menu-button,
 .action-button,
 .minor-button,
@@ -170,6 +184,12 @@ h2 {
   font-weight: 800;
 }
 
+.sidebar-status {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.03);
+}
+
 .main-stage {
   display: grid;
   gap: 18px;
@@ -181,6 +201,10 @@ h2 {
   align-items: flex-end;
   gap: 24px;
   padding: 22px;
+}
+
+.workspace-title {
+  max-width: 900px;
 }
 
 .workspace-title h2 {

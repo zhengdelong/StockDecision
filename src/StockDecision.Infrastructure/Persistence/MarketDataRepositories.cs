@@ -40,6 +40,46 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
 
         if (latestStocksFastPath.Count > 0)
         {
+            var stocksNeedingMetadataFallback = latestStocksFastPath
+                .Where(static item => string.IsNullOrWhiteSpace(item.IndustryName) || item.ListDate is null)
+                .Select(static item => item.StockCode)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var latestIndustryFallbackFastPath = stocksNeedingMetadataFallback.Count == 0
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : await dbContext.RawStocks
+                    .AsNoTracking()
+                    .Where(item => stocksNeedingMetadataFallback.Contains(item.StockCode))
+                    .Where(static item => item.IndustryName != null && item.IndustryName != string.Empty)
+                    .GroupBy(static item => item.StockCode)
+                    .Select(static group => group
+                        .OrderByDescending(item => item.CreatedAt)
+                        .Select(item => new
+                        {
+                            item.StockCode,
+                            item.IndustryName
+                        })
+                        .First())
+                    .ToDictionaryAsync(static item => item.StockCode, static item => item.IndustryName!, cancellationToken);
+
+            var latestListDateFallbackFastPath = stocksNeedingMetadataFallback.Count == 0
+                ? new Dictionary<string, DateOnly?>(StringComparer.OrdinalIgnoreCase)
+                : await dbContext.RawStocks
+                    .AsNoTracking()
+                    .Where(item => stocksNeedingMetadataFallback.Contains(item.StockCode))
+                    .Where(static item => item.ListDate != null)
+                    .GroupBy(static item => item.StockCode)
+                    .Select(static group => group
+                        .OrderByDescending(item => item.CreatedAt)
+                        .Select(item => new
+                        {
+                            item.StockCode,
+                            item.ListDate
+                        })
+                        .First())
+                    .ToDictionaryAsync(static item => item.StockCode, static item => item.ListDate, cancellationToken);
+
             var amountHistoryFastPath = await dbContext.RawDailyBars
                 .AsNoTracking()
                 .Where(item => item.TradeDate <= tradeDate)
@@ -70,15 +110,22 @@ public sealed class EfRawMarketDataRepository(StockDecisionDbContext dbContext) 
                 latestDailyFastPath.TryGetValue(item.StockCode, out var latestBar);
                 latestFinancialFastPath.TryGetValue(item.StockCode, out var financial);
                 amountHistoryFastPath.TryGetValue(item.StockCode, out var averageAmount20d);
+                latestIndustryFallbackFastPath.TryGetValue(item.StockCode, out var fallbackIndustryName);
+                latestListDateFallbackFastPath.TryGetValue(item.StockCode, out var fallbackListDate);
+
+                var resolvedIndustryName = string.IsNullOrWhiteSpace(item.IndustryName)
+                    ? fallbackIndustryName
+                    : item.IndustryName;
+                var resolvedListDate = item.ListDate ?? fallbackListDate;
 
                 return new StockProfile(
                     item.StockCode,
                     item.StockName,
-                    item.IndustryName,
+                    resolvedIndustryName,
                     item.IsActive,
                     item.IsSt,
                     item.IsDelistingRisk,
-                    item.ListDate,
+                    resolvedListDate,
                     latestBar?.Close,
                     financial?.Pe,
                     financial?.Pb,

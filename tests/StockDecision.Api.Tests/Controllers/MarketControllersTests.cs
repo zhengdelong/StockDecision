@@ -616,7 +616,7 @@ public class MarketControllersTests
                 5m,
                 DateTime.UtcNow.AddMinutes(-5),
                 [new BacktestEquityPointResponse(TradeDate, 112m, 12m)],
-                [new BacktestTradeItemResponse(TradeDate, "600001", "Alpha Tech", "突破", 25.36m, 28.40m, 12m, 12m, -2m, true, false)])
+                [new BacktestTradeItemResponse(TradeDate, "600001", "Alpha Tech", "突破", 25.36m, 28.40m, 12m, 12m, -2m, true, false, 300, 7613m, 913m, 2)])
         ];
         private int _nextId = 2;
 

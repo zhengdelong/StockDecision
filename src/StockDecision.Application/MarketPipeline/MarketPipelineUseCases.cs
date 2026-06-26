@@ -720,7 +720,11 @@ public sealed class GetBacktestOverviewUseCase(IMarketDataRepository marketRepos
             Math.Round(maxGainPct == decimal.MinValue ? 0m : maxGainPct, 2, MidpointRounding.AwayFromZero),
             Math.Round(maxDrawdownPct == decimal.MaxValue ? 0m : maxDrawdownPct, 2, MidpointRounding.AwayFromZero),
             hitTarget,
-            hitStopLoss);
+            hitStopLoss,
+            Math.Max(signal.EstimatedShares, 0),
+            Math.Round(entryPrice * Math.Max(signal.EstimatedShares, 0), 2, MidpointRounding.AwayFromZero),
+            0m,
+            forwardBars.Count);
     }
 }
 
