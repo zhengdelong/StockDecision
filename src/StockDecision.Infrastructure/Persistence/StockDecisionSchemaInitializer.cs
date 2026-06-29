@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 using System.Data;
 
 namespace StockDecision.Infrastructure.Persistence;
@@ -124,6 +125,9 @@ public static class StockDecisionSchemaInitializer
         await EnsureColumnAsync(dbContext, "strategy_candidates", "eligibility_reason", "ALTER TABLE strategy_candidates ADD COLUMN eligibility_reason VARCHAR(256) NOT NULL DEFAULT '' AFTER eligibility_status", cancellationToken);
         await EnsureColumnAsync(dbContext, "strategy_trade_signals", "eligibility_status", "ALTER TABLE strategy_trade_signals ADD COLUMN eligibility_status VARCHAR(32) NOT NULL DEFAULT 'tradable' AFTER strategy_type", cancellationToken);
         await EnsureColumnAsync(dbContext, "strategy_trade_signals", "eligibility_reason", "ALTER TABLE strategy_trade_signals ADD COLUMN eligibility_reason VARCHAR(256) NOT NULL DEFAULT '' AFTER eligibility_status", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_candidates", "risk_discipline_score_part", "ALTER TABLE strategy_candidates ADD COLUMN risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER fundamental_score_part", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_score_snapshots", "risk_discipline_score_part", "ALTER TABLE strategy_score_snapshots ADD COLUMN risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER fundamental_score_part", cancellationToken);
+        await EnsureColumnAsync(dbContext, "strategy_trade_signals", "risk_discipline_score_part", "ALTER TABLE strategy_trade_signals ADD COLUMN risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER fundamental_score_part", cancellationToken);
 
         await EnsureColumnAsync(dbContext, "backtest_runs", "benchmark_return_pct", "ALTER TABLE backtest_runs ADD COLUMN benchmark_return_pct DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER total_return_pct", cancellationToken);
         await EnsureColumnAsync(dbContext, "backtest_runs", "data_coverage_pct", "ALTER TABLE backtest_runs ADD COLUMN data_coverage_pct DECIMAL(10,4) NOT NULL DEFAULT 0 AFTER benchmark_return_pct", cancellationToken);
@@ -139,6 +143,20 @@ public static class StockDecisionSchemaInitializer
         await EnsureColumnAsync(dbContext, "learning_reviews", "followed_take_profit", "ALTER TABLE learning_reviews ADD COLUMN followed_take_profit TINYINT(1) NOT NULL DEFAULT 0 AFTER followed_stop_loss", cancellationToken);
         await EnsureColumnAsync(dbContext, "learning_reviews", "modified_plan_during_trade", "ALTER TABLE learning_reviews ADD COLUMN modified_plan_during_trade TINYINT(1) NOT NULL DEFAULT 0 AFTER followed_take_profit", cancellationToken);
         await EnsureColumnAsync(dbContext, "learning_reviews", "followed_gap_rule", "ALTER TABLE learning_reviews ADD COLUMN followed_gap_rule TINYINT(1) NOT NULL DEFAULT 0 AFTER modified_plan_during_trade", cancellationToken);
+        await EnsureColumnAsync(dbContext, "raw_stock_fund_flows", "rank_percentile_5d", "ALTER TABLE raw_stock_fund_flows ADD COLUMN rank_percentile_5d DECIMAL(10,4) NULL AFTER small_net_pct", cancellationToken);
+        await EnsureColumnAsync(dbContext, "market_stock_profiles", "scoring_industry_name", "ALTER TABLE market_stock_profiles ADD COLUMN scoring_industry_name VARCHAR(64) NULL AFTER industry_name", cancellationToken);
+        await EnsureFinancialColumnsAsync(dbContext, "raw_financial_snapshots", afterColumn: "free_float_market_cap", cancellationToken);
+        await EnsureFinancialColumnsAsync(dbContext, "market_financial_snapshots", afterColumn: "free_float_market_cap", cancellationToken);
+    }
+
+    private static async Task EnsureFinancialColumnsAsync(StockDecisionDbContext dbContext, string tableName, string afterColumn, CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(dbContext, tableName, "operating_cash_flow", $"ALTER TABLE {tableName} ADD COLUMN operating_cash_flow DECIMAL(20,2) NULL AFTER {afterColumn}", cancellationToken);
+        await EnsureColumnAsync(dbContext, tableName, "gross_margin", $"ALTER TABLE {tableName} ADD COLUMN gross_margin DECIMAL(18,4) NULL AFTER operating_cash_flow", cancellationToken);
+        await EnsureColumnAsync(dbContext, tableName, "debt_to_asset_ratio", $"ALTER TABLE {tableName} ADD COLUMN debt_to_asset_ratio DECIMAL(18,4) NULL AFTER gross_margin", cancellationToken);
+        await EnsureColumnAsync(dbContext, tableName, "operating_cash_flow_net", $"ALTER TABLE {tableName} ADD COLUMN operating_cash_flow_net DECIMAL(20,2) NULL AFTER debt_to_asset_ratio", cancellationToken);
+        await EnsureColumnAsync(dbContext, tableName, "announcement_date", $"ALTER TABLE {tableName} ADD COLUMN announcement_date DATE NULL AFTER operating_cash_flow_net", cancellationToken);
+        await EnsureColumnAsync(dbContext, tableName, "data_source_priority", $"ALTER TABLE {tableName} ADD COLUMN data_source_priority VARCHAR(32) NULL AFTER announcement_date", cancellationToken);
     }
 
     private static async Task EnsureColumnAsync(
@@ -150,7 +168,14 @@ public static class StockDecisionSchemaInitializer
     {
         if (!await ColumnExistsAsync(dbContext, tableName, columnName, cancellationToken))
         {
-            await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+            try
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+            }
+            catch (MySqlException exception) when (exception.Number == 1060)
+            {
+                // API 和 Worker 可能同时启动并补列；重复列说明另一个进程已经完成了同一项 DDL。
+            }
         }
     }
 
@@ -290,6 +315,7 @@ public static class StockDecisionSchemaInitializer
             stock_code VARCHAR(16) NOT NULL,
             stock_name VARCHAR(64) NOT NULL,
             industry_name VARCHAR(64) NULL,
+            scoring_industry_name VARCHAR(64) NULL,
             is_active TINYINT(1) NOT NULL,
             is_st TINYINT(1) NOT NULL,
             is_delisting_risk TINYINT(1) NOT NULL,
@@ -366,7 +392,62 @@ public static class StockDecisionSchemaInitializer
             revenue_yoy DECIMAL(18,4) NULL,
             net_profit_yoy DECIMAL(18,4) NULL,
             free_float_market_cap DECIMAL(20,2) NULL,
+            operating_cash_flow DECIMAL(20,2) NULL,
+            gross_margin DECIMAL(18,4) NULL,
+            debt_to_asset_ratio DECIMAL(18,4) NULL,
+            operating_cash_flow_net DECIMAL(20,2) NULL,
+            announcement_date DATE NULL,
+            data_source_priority VARCHAR(32) NULL,
             PRIMARY KEY (stock_code, report_date)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS market_stock_fund_flows (
+            stock_code VARCHAR(16) NOT NULL,
+            trade_date DATE NOT NULL,
+            main_net_amount DECIMAL(20,2) NULL,
+            main_net_pct DECIMAL(10,4) NULL,
+            super_large_net_amount DECIMAL(20,2) NULL,
+            super_large_net_pct DECIMAL(10,4) NULL,
+            large_net_amount DECIMAL(20,2) NULL,
+            large_net_pct DECIMAL(10,4) NULL,
+            medium_net_amount DECIMAL(20,2) NULL,
+            medium_net_pct DECIMAL(10,4) NULL,
+            small_net_amount DECIMAL(20,2) NULL,
+            small_net_pct DECIMAL(10,4) NULL,
+            rank_percentile_5d DECIMAL(10,4) NULL,
+            PRIMARY KEY (stock_code, trade_date)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS market_industry_fund_flows (
+            industry_name VARCHAR(64) NOT NULL,
+            trade_date DATE NOT NULL,
+            main_net_amount DECIMAL(20,2) NULL,
+            main_net_pct DECIMAL(10,4) NULL,
+            `rank` INT NULL,
+            rank_percentile DECIMAL(10,4) NULL,
+            PRIMARY KEY (industry_name, trade_date)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS market_lhb_snapshots (
+            stock_code VARCHAR(16) NOT NULL,
+            trade_date DATE NOT NULL,
+            reason VARCHAR(128) NOT NULL,
+            buy_top5_amount DECIMAL(20,2) NULL,
+            sell_top5_amount DECIMAL(20,2) NULL,
+            net_amount DECIMAL(20,2) NULL,
+            institution_buy_amount DECIMAL(20,2) NULL,
+            institution_sell_amount DECIMAL(20,2) NULL,
+            institution_net_amount DECIMAL(20,2) NULL,
+            institution_buy_count INT NULL,
+            is_institution_net_buy TINYINT(1) NOT NULL,
+            is_on_lhb_today TINYINT(1) NOT NULL,
+            recent_20d_lhb_count INT NOT NULL,
+            days_since_last_lhb INT NULL,
+            risk_flags LONGTEXT NULL,
+            PRIMARY KEY (stock_code, trade_date)
         )
         """,
         """
@@ -418,6 +499,7 @@ public static class StockDecisionSchemaInitializer
             trend_score_part DECIMAL(10,4) NOT NULL,
             volume_price_score_part DECIMAL(10,4) NOT NULL,
             fundamental_score_part DECIMAL(10,4) NOT NULL,
+            risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0,
             close DECIMAL(18,4) NOT NULL,
             ma20 DECIMAL(18,4) NOT NULL,
             ma60 DECIMAL(18,4) NOT NULL,
@@ -435,6 +517,26 @@ public static class StockDecisionSchemaInitializer
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS strategy_score_snapshots (
+            trade_date DATE NOT NULL,
+            snapshot_version VARCHAR(32) NOT NULL DEFAULT 'end_of_day_final',
+            stock_code VARCHAR(16) NOT NULL,
+            stock_name VARCHAR(64) NOT NULL,
+            industry_name VARCHAR(64) NULL,
+            total_score DECIMAL(10,4) NOT NULL,
+            relative_strength_score_part DECIMAL(10,4) NOT NULL,
+            trend_score_part DECIMAL(10,4) NOT NULL,
+            volume_price_score_part DECIMAL(10,4) NOT NULL,
+            fundamental_score_part DECIMAL(10,4) NOT NULL,
+            risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0,
+            pe DECIMAL(18,4) NULL,
+            pb DECIMAL(18,4) NULL,
+            roe DECIMAL(18,4) NULL,
+            PRIMARY KEY (trade_date, snapshot_version, stock_code),
+            INDEX idx_strategy_score_snapshots_score (trade_date, snapshot_version, total_score)
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS strategy_trade_signals (
             trade_date DATE NOT NULL,
             snapshot_version VARCHAR(32) NOT NULL DEFAULT 'end_of_day_final',
@@ -449,6 +551,7 @@ public static class StockDecisionSchemaInitializer
             trend_score_part DECIMAL(10,4) NOT NULL,
             volume_price_score_part DECIMAL(10,4) NOT NULL,
             fundamental_score_part DECIMAL(10,4) NOT NULL,
+            risk_discipline_score_part DECIMAL(10,4) NOT NULL DEFAULT 0,
             trigger_price DECIMAL(18,4) NOT NULL,
             stop_loss_price DECIMAL(18,4) NOT NULL,
             target_price DECIMAL(18,4) NOT NULL,

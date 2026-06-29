@@ -785,6 +785,12 @@ h2 {
   gap: 12px;
 }
 
+.detail-industry-lines {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
 .detail-score-badge {
   display: inline-flex;
   align-items: baseline;
@@ -1177,6 +1183,49 @@ h2 {
   font-size: 16px;
 }
 
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.decision-grid.compact {
+  margin-top: 12px;
+}
+
+.decision-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: #f8fafc;
+}
+
+.decision-card span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.decision-card strong {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.decision-card small {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.decision-card.reward {
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.95), rgba(255, 255, 255, 0.92));
+}
+
+.decision-card.risk {
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(255, 255, 255, 0.92));
+}
+
 .scenario-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1369,6 +1418,14 @@ h2 {
   color: #64748b;
 }
 
+.cell-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.6;
+}
+
 @media (max-width: 1480px) {
   .workspace {
     grid-template-columns: minmax(0, 0.95fr) minmax(560px, 1.15fr);
@@ -1435,6 +1492,7 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .decision-grid,
   .scenario-grid {
     grid-template-columns: 1fr;
   }

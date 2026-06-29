@@ -259,7 +259,8 @@ public sealed record CandidateListItemResponse
         decimal targetPrice,
         decimal riskRewardRatio,
         string explanation,
-        IReadOnlyList<ScoreRuleDetailResponse>? scoreDetails = null)
+        IReadOnlyList<ScoreRuleDetailResponse>? scoreDetails = null,
+        TradeExecutionPlanResponse? executionPlan = null)
     {
         StockCode = stockCode;
         StockName = stockName;
@@ -281,6 +282,7 @@ public sealed record CandidateListItemResponse
         RiskRewardRatio = riskRewardRatio;
         Explanation = explanation;
         ScoreDetails = scoreDetails ?? [];
+        ExecutionPlan = executionPlan;
     }
 
     /// <summary>股票代码。</summary>
@@ -322,6 +324,8 @@ public sealed record CandidateListItemResponse
     /// <summary>解释文本。</summary>
     public string Explanation { get; init; }
     public IReadOnlyList<ScoreRuleDetailResponse> ScoreDetails { get; init; }
+    /// <summary>结构化执行计划。</summary>
+    public TradeExecutionPlanResponse? ExecutionPlan { get; init; }
 }
 
 /// <summary>
@@ -348,7 +352,8 @@ public sealed record SignalListItemResponse
         decimal suggestedCapital,
         int estimatedShares,
         string explanation,
-        DateTime generatedAtUtc)
+        DateTime generatedAtUtc,
+        TradeExecutionPlanResponse? executionPlan = null)
     {
         StockCode = stockCode;
         StockName = stockName;
@@ -366,6 +371,7 @@ public sealed record SignalListItemResponse
         EstimatedShares = estimatedShares;
         Explanation = explanation;
         GeneratedAtUtc = generatedAtUtc;
+        ExecutionPlan = executionPlan;
     }
 
     /// <summary>股票代码。</summary>
@@ -400,7 +406,39 @@ public sealed record SignalListItemResponse
     public string Explanation { get; init; }
     /// <summary>UTC 生成时间。</summary>
     public DateTime GeneratedAtUtc { get; init; }
+    /// <summary>结构化执行计划。</summary>
+    public TradeExecutionPlanResponse? ExecutionPlan { get; init; }
 }
+
+/// <summary>
+/// 执行计划中的单条规则。
+/// </summary>
+public sealed record ExecutionPlanRuleResponse(
+    string Label,
+    string Value,
+    string Description);
+
+/// <summary>
+/// 个股执行计划响应。
+/// </summary>
+public sealed record TradeExecutionPlanResponse(
+    string PlanType,
+    string Status,
+    string Summary,
+    decimal ReferencePrice,
+    decimal TriggerPrice,
+    decimal StopLossPrice,
+    decimal TargetPrice,
+    decimal RiskRewardRatio,
+    decimal? SuggestedCapital,
+    int? EstimatedShares,
+    int ObservationDays,
+    int MaxHoldingDays,
+    decimal MaxEntryGapPct,
+    IReadOnlyList<ExecutionPlanRuleResponse> EntryRules,
+    IReadOnlyList<ExecutionPlanRuleResponse> HoldRules,
+    IReadOnlyList<ExecutionPlanRuleResponse> ExitRules,
+    IReadOnlyList<ExecutionPlanRuleResponse> InvalidationRules);
 
 /// <summary>
 /// 个股详情响应。
@@ -430,7 +468,13 @@ public sealed record FinancialListItemResponse(
     decimal? Roe,
     decimal? RevenueYoy,
     decimal? NetProfitYoy,
-    decimal? FreeFloatMarketCap);
+    decimal? FreeFloatMarketCap,
+    decimal? OperatingCashFlow = null,
+    decimal? GrossMargin = null,
+    decimal? DebtToAssetRatio = null,
+    decimal? OperatingCashFlowNet = null,
+    DateOnly? AnnouncementDate = null,
+    string? DataSourcePriority = null);
 
 public sealed record StockDetailResponse
 {
@@ -447,19 +491,25 @@ public sealed record StockDetailResponse
         PriceSeriesResponse latestBar,
         FinancialSummaryResponse? financial,
         IndicatorSummaryResponse? indicator,
+        FundFlowSummaryResponse? fundFlow,
+        LhbSummaryResponse? lhb,
         CandidateListItemResponse? candidate,
         SignalListItemResponse? signal,
-        IReadOnlyList<PriceSeriesResponse> recentBars)
+        IReadOnlyList<PriceSeriesResponse> recentBars,
+        string? scoringIndustryName = null)
     {
         StockCode = stockCode;
         StockName = stockName;
         IndustryName = industryName;
+        ScoringIndustryName = scoringIndustryName;
         TradeDate = tradeDate;
         SnapshotVersion = snapshotVersion;
         SnapshotVersionName = snapshotVersionName;
         LatestBar = latestBar;
         Financial = financial;
         Indicator = indicator;
+        FundFlow = fundFlow;
+        Lhb = lhb;
         Candidate = candidate;
         Signal = signal;
         RecentBars = recentBars;
@@ -471,6 +521,8 @@ public sealed record StockDetailResponse
     public string StockName { get; init; }
     /// <summary>行业名称。</summary>
     public string? IndustryName { get; init; }
+    /// <summary>用于行业强度和行业资金流评分匹配的行业名称。</summary>
+    public string? ScoringIndustryName { get; init; }
     /// <summary>交易日。</summary>
     public DateOnly TradeDate { get; init; }
     /// <summary>当前详情使用的快照版本值。</summary>
@@ -483,6 +535,10 @@ public sealed record StockDetailResponse
     public FinancialSummaryResponse? Financial { get; init; }
     /// <summary>指标摘要。</summary>
     public IndicatorSummaryResponse? Indicator { get; init; }
+    /// <summary>资金流摘要。</summary>
+    public FundFlowSummaryResponse? FundFlow { get; init; }
+    /// <summary>龙虎榜摘要。</summary>
+    public LhbSummaryResponse? Lhb { get; init; }
     /// <summary>候选股结果。</summary>
     public CandidateListItemResponse? Candidate { get; init; }
     /// <summary>交易信号结果。</summary>
@@ -559,7 +615,13 @@ public sealed record FinancialSummaryResponse
         decimal? pb,
         decimal? roe,
         decimal? revenueYoy,
-        decimal? netProfitYoy)
+        decimal? netProfitYoy,
+        decimal? operatingCashFlow = null,
+        decimal? grossMargin = null,
+        decimal? debtToAssetRatio = null,
+        decimal? operatingCashFlowNet = null,
+        DateOnly? announcementDate = null,
+        string? dataSourcePriority = null)
     {
         ReportDate = reportDate;
         Pe = pe;
@@ -567,6 +629,12 @@ public sealed record FinancialSummaryResponse
         Roe = roe;
         RevenueYoy = revenueYoy;
         NetProfitYoy = netProfitYoy;
+        OperatingCashFlow = operatingCashFlow;
+        GrossMargin = grossMargin;
+        DebtToAssetRatio = debtToAssetRatio;
+        OperatingCashFlowNet = operatingCashFlowNet;
+        AnnouncementDate = announcementDate;
+        DataSourcePriority = dataSourcePriority;
     }
 
     /// <summary>财报日期。</summary>
@@ -581,7 +649,28 @@ public sealed record FinancialSummaryResponse
     public decimal? RevenueYoy { get; init; }
     /// <summary>净利润同比。</summary>
     public decimal? NetProfitYoy { get; init; }
+    public decimal? OperatingCashFlow { get; init; }
+    public decimal? GrossMargin { get; init; }
+    public decimal? DebtToAssetRatio { get; init; }
+    public decimal? OperatingCashFlowNet { get; init; }
+    public DateOnly? AnnouncementDate { get; init; }
+    public string? DataSourcePriority { get; init; }
 }
+
+/// <summary>
+/// 资金流摘要响应。
+/// </summary>
+public sealed record FundFlowSummaryResponse(
+    DateOnly TradeDate,
+    decimal? MainNetAmount,
+    decimal? MainNetPct,
+    decimal? SuperLargeNetAmount,
+    decimal? SuperLargeNetPct,
+    decimal? RankPercentile5d,
+    decimal? IndustryMainNetAmount,
+    decimal? IndustryMainNetPct,
+    int? IndustryRank,
+    decimal? IndustryRankPercentile);
 
 /// <summary>
 /// 技术指标摘要响应。
@@ -644,6 +733,21 @@ public sealed record IndicatorSummaryResponse
     /// <summary>相对 20 日均线偏离百分比。</summary>
     public decimal DistanceToMa20Pct { get; init; }
 }
+
+/// <summary>
+/// 龙虎榜摘要响应。
+/// </summary>
+public sealed record LhbSummaryResponse(
+    bool IsOnLhbToday,
+    DateOnly? TradeDate,
+    string? Reason,
+    decimal? NetAmount,
+    decimal? InstitutionNetAmount,
+    int? InstitutionBuyCount,
+    bool IsInstitutionNetBuy,
+    int Recent20dLhbCount,
+    int? DaysSinceLastLhb,
+    string? RiskFlags);
 
 /// <summary>
 /// 单次导入快照结果。
@@ -730,6 +834,12 @@ public interface IRawMarketDataRepository
     /// 读取每只股票最近一期财务快照。
     /// </summary>
     Task<IReadOnlyList<FinancialSnapshot>> GetLatestFinancialSnapshotsAsync(CancellationToken cancellationToken);
+    /// <summary>读取指定交易日的个股资金流快照。</summary>
+    Task<IReadOnlyList<StockFundFlowSnapshot>> GetStockFundFlowsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken);
+    /// <summary>读取指定交易日的行业资金流快照。</summary>
+    Task<IReadOnlyList<IndustryFundFlowSnapshot>> GetIndustryFundFlowsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken);
+    /// <summary>读取指定交易日的龙虎榜汇总快照。</summary>
+    Task<IReadOnlyList<LhbSnapshot>> GetLhbSnapshotsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken);
     Task<DateOnly?> GetLatestFinancialReportDateAsync(CancellationToken cancellationToken);
 }
 
@@ -753,12 +863,21 @@ public interface IMarketDataRepository
         IReadOnlyList<MarketIndexBar> indexBars,
         IReadOnlyList<IndustryDailyStat> industries,
         IReadOnlyList<FinancialSnapshot> financials,
+        IReadOnlyList<StockFundFlowSnapshot> stockFundFlows,
+        IReadOnlyList<IndustryFundFlowSnapshot> industryFundFlows,
+        IReadOnlyList<LhbSnapshot> lhbSnapshots,
         CancellationToken cancellationToken);
 
     /// <summary>读取活跃股票代码列表。</summary>
     Task<IReadOnlyList<string>> GetActiveStockCodesAsync(CancellationToken cancellationToken);
     /// <summary>读取单只股票历史日线。</summary>
     Task<IReadOnlyList<DailyBar>> GetDailyBarHistoryAsync(string stockCode, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken);
+    /// <summary>按股票代码批量读取历史日线。</summary>
+    Task<IReadOnlyDictionary<string, IReadOnlyList<DailyBar>>> GetDailyBarHistoriesByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken);
+    /// <summary>按股票代码批量读取生成策略指标所需的历史聚合结果。</summary>
+    Task<IReadOnlyDictionary<string, IndicatorCalculationMetrics>> GetIndicatorCalculationMetricsByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken);
+    /// <summary>按股票代码批量读取列表打分所需的轻量历史量价指标。</summary>
+    Task<IReadOnlyDictionary<string, StockScoringHistoryMetrics>> GetScoringHistoryMetricsByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, CancellationToken cancellationToken);
     /// <summary>读取单只股票指定交易日后的前瞻日线。</summary>
     Task<IReadOnlyList<DailyBar>> GetForwardDailyBarsAsync(string stockCode, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken);
     /// <summary>读取指数历史日线。</summary>
@@ -771,6 +890,12 @@ public interface IMarketDataRepository
     Task<IReadOnlyDictionary<string, FinancialSnapshot>> GetLatestFinancialsByCodesAsync(IEnumerable<string> stockCodes, CancellationToken cancellationToken);
     /// <summary>读取全部最新财务快照。</summary>
     Task<IReadOnlyList<FinancialSnapshot>> GetLatestFinancialSnapshotsAsync(CancellationToken cancellationToken);
+    /// <summary>按代码批量读取个股资金流。</summary>
+    Task<IReadOnlyDictionary<string, StockFundFlowSnapshot>> GetStockFundFlowsByCodesAsync(DateOnly tradeDate, IEnumerable<string> stockCodes, CancellationToken cancellationToken);
+    /// <summary>按行业名批量读取行业资金流。</summary>
+    Task<IReadOnlyDictionary<string, IndustryFundFlowSnapshot>> GetIndustryFundFlowsByNamesAsync(DateOnly tradeDate, IEnumerable<string?> industryNames, CancellationToken cancellationToken);
+    /// <summary>按代码批量读取龙虎榜快照。</summary>
+    Task<IReadOnlyDictionary<string, LhbSnapshot>> GetLhbSnapshotsByCodesAsync(DateOnly tradeDate, IEnumerable<string> stockCodes, CancellationToken cancellationToken);
     Task<DateOnly?> GetLatestImportedFinancialReportDateAsync(CancellationToken cancellationToken);
     /// <summary>读取指定交易日的行业快照列表。</summary>
     Task<IReadOnlyList<IndustryDailyStat>> GetIndustryStatsAsync(DateOnly tradeDate, CancellationToken cancellationToken);
@@ -782,8 +907,14 @@ public interface IMarketDataRepository
     Task UpsertMarketRegimeAsync(StrategySnapshotVersion snapshotVersion, MarketRegimeSnapshot regime, CancellationToken cancellationToken);
     /// <summary>写入候选股结果。</summary>
     Task UpsertCandidatesAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<CandidateStock> candidates, CancellationToken cancellationToken);
+    /// <summary>写入全市场综合得分快照。</summary>
+    Task UpsertScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<StrategyScoreSnapshot> scores, CancellationToken cancellationToken);
     /// <summary>写入交易信号结果。</summary>
     Task UpsertSignalsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<TradeSignal> signals, CancellationToken cancellationToken);
+    /// <summary>读取指定交易日和版本的综合得分快照数量。</summary>
+    Task<int> CountScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken);
+    /// <summary>按数据库排序分页读取财务列表。</summary>
+    Task<PagedResponse<FinancialListItemResponse>> GetFinancialScorePageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FinancialListQuery query, CancellationToken cancellationToken);
     /// <summary>读取指定交易日指标快照。</summary>
     Task<IReadOnlyList<IndicatorSnapshot>> GetIndicatorSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken);
     /// <summary>读取指定交易日市场环境。</summary>

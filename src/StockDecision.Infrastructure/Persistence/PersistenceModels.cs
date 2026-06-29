@@ -168,6 +168,65 @@ public sealed class RawFinancialSnapshotRow
     public decimal? NetProfitYoy { get; set; }
     /// <summary>流通市值。</summary>
     public decimal? FreeFloatMarketCap { get; set; }
+    public decimal? OperatingCashFlow { get; set; }
+    public decimal? GrossMargin { get; set; }
+    public decimal? DebtToAssetRatio { get; set; }
+    public decimal? OperatingCashFlowNet { get; set; }
+    public DateOnly? AnnouncementDate { get; set; }
+    public string? DataSourcePriority { get; set; }
+}
+
+/// <summary>
+/// 原始个股资金流行。
+/// </summary>
+public sealed class RawStockFundFlowRow
+{
+    public int Id { get; set; }
+    public string StockCode { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public decimal? SuperLargeNetAmount { get; set; }
+    public decimal? SuperLargeNetPct { get; set; }
+    public decimal? LargeNetAmount { get; set; }
+    public decimal? LargeNetPct { get; set; }
+    public decimal? MediumNetAmount { get; set; }
+    public decimal? MediumNetPct { get; set; }
+    public decimal? SmallNetAmount { get; set; }
+    public decimal? SmallNetPct { get; set; }
+    public decimal? RankPercentile5d { get; set; }
+}
+
+/// <summary>
+/// 原始行业资金流行。
+/// </summary>
+public sealed class RawIndustryFundFlowRow
+{
+    public int Id { get; set; }
+    public string IndustryName { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public int? Rank { get; set; }
+}
+
+/// <summary>
+/// 原始龙虎榜汇总行。
+/// </summary>
+public sealed class RawLhbStockSummaryRow
+{
+    public int Id { get; set; }
+    public string StockCode { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public string? Reason { get; set; }
+    public decimal? BuyTop5Amount { get; set; }
+    public decimal? SellTop5Amount { get; set; }
+    public decimal? NetAmount { get; set; }
+    public decimal? InstitutionBuyAmount { get; set; }
+    public decimal? InstitutionSellAmount { get; set; }
+    public decimal? InstitutionNetAmount { get; set; }
+    public int? InstitutionBuyCount { get; set; }
+    public bool IsInstitutionNetBuy { get; set; }
 }
 
 /// <summary>
@@ -200,6 +259,8 @@ public sealed class MarketStockProfileEntity
     public string StockName { get; set; } = string.Empty;
     /// <summary>行业名称。</summary>
     public string? IndustryName { get; set; }
+    /// <summary>用于行业强度和行业资金流评分匹配的行业名称。</summary>
+    public string? ScoringIndustryName { get; set; }
     /// <summary>是否有效。</summary>
     public bool IsActive { get; set; }
     /// <summary>是否 ST。</summary>
@@ -302,6 +363,67 @@ public sealed class MarketFinancialSnapshotEntity
     public decimal? NetProfitYoy { get; set; }
     /// <summary>流通市值。</summary>
     public decimal? FreeFloatMarketCap { get; set; }
+    public decimal? OperatingCashFlow { get; set; }
+    public decimal? GrossMargin { get; set; }
+    public decimal? DebtToAssetRatio { get; set; }
+    public decimal? OperatingCashFlowNet { get; set; }
+    public DateOnly? AnnouncementDate { get; set; }
+    public string? DataSourcePriority { get; set; }
+}
+
+/// <summary>
+/// 领域层个股资金流实体。
+/// </summary>
+public sealed class MarketStockFundFlowEntity
+{
+    public string StockCode { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public decimal? SuperLargeNetAmount { get; set; }
+    public decimal? SuperLargeNetPct { get; set; }
+    public decimal? LargeNetAmount { get; set; }
+    public decimal? LargeNetPct { get; set; }
+    public decimal? MediumNetAmount { get; set; }
+    public decimal? MediumNetPct { get; set; }
+    public decimal? SmallNetAmount { get; set; }
+    public decimal? SmallNetPct { get; set; }
+    public decimal? RankPercentile5d { get; set; }
+}
+
+/// <summary>
+/// 领域层行业资金流实体。
+/// </summary>
+public sealed class MarketIndustryFundFlowEntity
+{
+    public string IndustryName { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public int? Rank { get; set; }
+    public decimal? RankPercentile { get; set; }
+}
+
+/// <summary>
+/// 领域层龙虎榜快照实体。
+/// </summary>
+public sealed class MarketLhbSnapshotEntity
+{
+    public string StockCode { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public string? Reason { get; set; }
+    public decimal? BuyTop5Amount { get; set; }
+    public decimal? SellTop5Amount { get; set; }
+    public decimal? NetAmount { get; set; }
+    public decimal? InstitutionBuyAmount { get; set; }
+    public decimal? InstitutionSellAmount { get; set; }
+    public decimal? InstitutionNetAmount { get; set; }
+    public int? InstitutionBuyCount { get; set; }
+    public bool IsInstitutionNetBuy { get; set; }
+    public bool IsOnLhbToday { get; set; }
+    public int Recent20dLhbCount { get; set; }
+    public int? DaysSinceLastLhb { get; set; }
+    public string? RiskFlags { get; set; }
 }
 
 /// <summary>
@@ -397,6 +519,8 @@ public sealed class StrategyCandidateEntity
     public decimal VolumePriceScorePart { get; set; }
     /// <summary>基本面分项。</summary>
     public decimal FundamentalScorePart { get; set; }
+    /// <summary>风险纪律分项。</summary>
+    public decimal RiskDisciplineScorePart { get; set; }
     /// <summary>收盘价。</summary>
     public decimal Close { get; set; }
     /// <summary>20 日均线。</summary>
@@ -423,6 +547,27 @@ public sealed class StrategyCandidateEntity
     public decimal RiskRewardRatio { get; set; }
     /// <summary>解释文本。</summary>
     public string Explanation { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 全市场股票综合得分快照实体。
+/// </summary>
+public sealed class StrategyScoreSnapshotEntity
+{
+    public DateOnly TradeDate { get; set; }
+    public string SnapshotVersion { get; set; } = string.Empty;
+    public string StockCode { get; set; } = string.Empty;
+    public string StockName { get; set; } = string.Empty;
+    public string? IndustryName { get; set; }
+    public decimal TotalScore { get; set; }
+    public decimal RelativeStrengthScorePart { get; set; }
+    public decimal TrendScorePart { get; set; }
+    public decimal VolumePriceScorePart { get; set; }
+    public decimal FundamentalScorePart { get; set; }
+    public decimal RiskDisciplineScorePart { get; set; }
+    public decimal? Pe { get; set; }
+    public decimal? Pb { get; set; }
+    public decimal? Roe { get; set; }
 }
 
 /// <summary>
@@ -456,6 +601,8 @@ public sealed class StrategyTradeSignalEntity
     public decimal VolumePriceScorePart { get; set; }
     /// <summary>基本面分项。</summary>
     public decimal FundamentalScorePart { get; set; }
+    /// <summary>风险纪律分项。</summary>
+    public decimal RiskDisciplineScorePart { get; set; }
     /// <summary>触发价。</summary>
     public decimal TriggerPrice { get; set; }
     /// <summary>止损价。</summary>

@@ -40,6 +40,40 @@ public static class IndicatorMath
         return Math.Round(((latest - baseline) / baseline) * 100m, 4, MidpointRounding.AwayFromZero);
     }
 
+    public static decimal CalculateIndexReturn(IReadOnlyList<MarketIndexBar> bars, int period)
+    {
+        if (bars.Count <= period)
+        {
+            return 0m;
+        }
+
+        var latest = bars[^1].Close;
+        var baseline = bars[bars.Count - 1 - period].Close;
+        if (baseline == 0m)
+        {
+            return 0m;
+        }
+
+        return Math.Round(((latest - baseline) / baseline) * 100m, 4, MidpointRounding.AwayFromZero);
+    }
+
+    public static decimal CalculateAmountRatio(IReadOnlyList<DailyBar> bars, int period)
+    {
+        if (bars.Count <= period)
+        {
+            return 0m;
+        }
+
+        var latestAmount = bars[^1].Amount;
+        var averageAmount = bars.TakeLast(period + 1).Take(period).Average(static item => item.Amount);
+        if (averageAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        return Math.Round(latestAmount / averageAmount, 4, MidpointRounding.AwayFromZero);
+    }
+
     /// <summary>
     /// 计算 14 日平均真实波幅。
     /// </summary>
@@ -118,13 +152,24 @@ public static class MarketRegimePolicy
     }
 }
 
+public sealed record CandidateScoringContext(
+    decimal Return10d,
+    decimal IndexReturn20d,
+    decimal IndexReturn60d,
+    decimal? IndustryReturn20d,
+    bool IsMa60Upward,
+    decimal AmountRatio1d,
+    StockFundFlowSnapshot? StockFundFlow,
+    IndustryFundFlowSnapshot? IndustryFundFlow,
+    LhbSnapshot? Lhb);
+
 /// <summary>
 /// 封装候选股与交易信号的业务规则。
 /// </summary>
 public static class CandidatePolicy
 {
-    private const decimal CandidatePoolMinimumScore = 80m;
-    private const decimal StrongWatchMinimumScore = 85m;
+    private const decimal CandidatePoolMinimumScore = 82m;
+    private const decimal StrongWatchMinimumScore = 88m;
     private const decimal TradableMinimumScore = 90m;
 
     /// <summary>
@@ -134,9 +179,10 @@ public static class CandidatePolicy
         StockProfile profile,
         IndicatorSnapshot indicator,
         FinancialSnapshot? financial,
-        IndustryDailyStat? industry)
+        IndustryDailyStat? industry,
+        CandidateScoringContext? context = null)
     {
-        return BuildScoreBreakdown(profile, indicator, financial, industry);
+        return BuildScoreBreakdown(profile, indicator, financial, industry, context);
     }
 
     public static CandidateListPreview DescribeCandidatePreview(
@@ -146,9 +192,11 @@ public static class CandidatePolicy
         FinancialSnapshot? financial,
         IndustryDailyStat? industry,
         MarketRegimeSnapshot regime,
-        bool isInTradablePool)
+        bool isInTradablePool,
+        CandidateScoringContext? context = null)
     {
-        var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry);
+        var resolvedContext = context ?? BuildDefaultContext(indicator, industry);
+        var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry, resolvedContext);
         var totalScore = scoreBreakdown.TotalScore;
         var strategyType = ResolveStrategyType(indicator, regime);
         var stopLoss = ResolveStopLoss(indicator.Close, indicator.Ma20, strategyType);
@@ -177,7 +225,7 @@ public static class CandidatePolicy
             stopLoss,
             targetPrice,
             riskReward,
-            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason));
+            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason, resolvedContext));
     }
 
     /// <summary>
@@ -189,6 +237,7 @@ public static class CandidatePolicy
         IndicatorSnapshot indicator,
         FinancialSnapshot? financial,
         IndustryDailyStat? industry,
+        CandidateScoringContext context,
         MarketRegimeSnapshot regime,
         bool isInTradablePool,
         bool isInWatchPool)
@@ -231,7 +280,12 @@ public static class CandidatePolicy
             return null;
         }
 
-        var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry);
+        if (context.Return10d > 30m)
+        {
+            return null;
+        }
+
+        var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry, context);
         var totalScore = scoreBreakdown.TotalScore;
         if (totalScore < CandidatePoolMinimumScore)
         {
@@ -269,7 +323,7 @@ public static class CandidatePolicy
             stopLoss,
             targetPrice,
             riskReward,
-            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason));
+            BuildExplanation(profile, indicator, industry, regime, scoreBreakdown, riskReward, eligibility.Reason, context));
     }
 
     /// <summary>
@@ -277,7 +331,7 @@ public static class CandidatePolicy
     /// </summary>
     public static TradeSignal? BuildSignal(CandidateStock candidate, MarketRegimeSnapshot regime)
     {
-        if (!candidate.IsTradable || candidate.RiskRewardRatio < 2m || regime.Regime == MarketSignalEligibility.NoTrade)
+        if (!candidate.IsTradable || candidate.RiskRewardRatio < 1.8m || regime.Regime == MarketSignalEligibility.NoTrade)
         {
             return null;
         }
@@ -329,39 +383,84 @@ public static class CandidatePolicy
         StockProfile profile,
         IndicatorSnapshot indicator,
         FinancialSnapshot? financial,
-        IndustryDailyStat? industry)
+        IndustryDailyStat? industry,
+        CandidateScoringContext? context)
     {
+        var resolvedContext = context ?? BuildDefaultContext(indicator, industry);
         var details = new List<ScoreRuleDetail>();
+        var rs20ExcessVsIndex = indicator.Return20d - resolvedContext.IndexReturn20d;
+        var rs20ExcessVsIndustry = indicator.Return20d - (resolvedContext.IndustryReturn20d ?? 0m);
+        var rs60ExcessVsIndex = indicator.Return60d - resolvedContext.IndexReturn60d;
 
-        AddRule(details, "return20d", "相对强弱", "20日收益率为正", 10m, indicator.Return20d > 0m, $"当前 {indicator.Return20d:0.##}%");
-        AddRule(details, "return60d", "相对强弱", "60日收益率为正", 8m, indicator.Return60d > 0m, $"当前 {indicator.Return60d:0.##}%");
-        AddRule(details, "relativeStrength", "相对强弱", "相对强弱得分为正", 7m, indicator.RelativeStrengthScore > 0m, $"当前 {indicator.RelativeStrengthScore:0.##}");
-        AddRule(details, "distanceToMa20Rs", "相对强弱", "距MA20不超过10%", 5m, indicator.DistanceToMa20Pct <= 10m, $"当前 {indicator.DistanceToMa20Pct:0.##}%");
+        AddRule(details, "rs20ExcessVsIndex", "相对强弱", "20日超额收益强于指数", 8m, rs20ExcessVsIndex > 0m, $"当前 {rs20ExcessVsIndex:0.##}%");
+        AddRule(details, "rs20ExcessVsIndustry", "相对强弱", "20日超额收益强于行业", 7m, rs20ExcessVsIndustry > 0m, $"当前 {rs20ExcessVsIndustry:0.##}%");
+        AddRule(details, "rs60ExcessVsIndex", "相对强弱", "60日超额收益强于指数", 7m, rs60ExcessVsIndex > 0m, $"当前 {rs60ExcessVsIndex:0.##}%");
+        AddRule(details, "relativeStrengthPercentile", "相对强弱", "市场相对强度分位不低于80", 8m, indicator.RelativeStrengthScore >= 80m, $"当前 {indicator.RelativeStrengthScore:0.##}");
 
-        AddRule(details, "closeAboveMa60", "趋势", "收盘价站上MA60", 6m, indicator.Close > indicator.Ma60, $"收盘 {indicator.Close:0.##} / MA60 {indicator.Ma60:0.##}");
-        AddRule(details, "bullishStacked", "趋势", "均线多头排列", 8m, indicator.IsBullishStacked, $"MA20 {indicator.Ma20:0.##} / MA60 {indicator.Ma60:0.##} / MA120 {indicator.Ma120:0.##}");
-        AddRule(details, "closeAboveMa20", "趋势", "收盘价站上MA20", 4m, indicator.Close > indicator.Ma20, $"收盘 {indicator.Close:0.##} / MA20 {indicator.Ma20:0.##}");
-        AddRule(details, "ma20Upward", "趋势", "MA20保持上行", 4m, indicator.IsMa20Upward, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
-        AddRule(details, "distanceToMa20Trend", "趋势", "距MA20不超过10%", 3m, indicator.DistanceToMa20Pct <= 10m, $"当前 {indicator.DistanceToMa20Pct:0.##}%");
+        AddRule(details, "closeAboveMa20", "趋势质量", "收盘站上MA20", 4m, indicator.Close > indicator.Ma20, $"收盘 {indicator.Close:0.##} / MA20 {indicator.Ma20:0.##}");
+        AddRule(details, "closeAboveMa60", "趋势质量", "收盘站上MA60", 5m, indicator.Close > indicator.Ma60, $"收盘 {indicator.Close:0.##} / MA60 {indicator.Ma60:0.##}");
+        AddRule(details, "closeAboveMa120", "趋势质量", "收盘站上MA120", 2m, indicator.Close > indicator.Ma120, $"收盘 {indicator.Close:0.##} / MA120 {indicator.Ma120:0.##}");
+        AddRule(details, "bullishStacked", "趋势质量", "均线多头排列", 6m, indicator.IsBullishStacked, $"MA20 {indicator.Ma20:0.##} / MA60 {indicator.Ma60:0.##} / MA120 {indicator.Ma120:0.##}");
+        AddRule(details, "ma20Upward", "趋势质量", "MA20上行", 3m, indicator.IsMa20Upward, $"偏离 {indicator.DistanceToMa20Pct:0.##}%");
+        AddRule(details, "ma60Upward", "趋势质量", "MA60上行", 2m, resolvedContext.IsMa60Upward, $"MA60 {indicator.Ma60:0.##}");
+        AddRule(details, "breakout20d", "趋势质量", "20日收盘突破", 2m, indicator.Is20DayBreakout, $"收盘 {indicator.Close:0.##}");
+        AddRule(details, "distanceToMa20", "趋势质量", "距离MA20不超过10%", 1m, indicator.DistanceToMa20Pct <= 10m, $"当前 {indicator.DistanceToMa20Pct:0.##}%");
 
-        var turnoverRate = profile.TurnoverRate ?? indicator.TurnoverRate ?? 0m;
-        AddRule(details, "breakout20d", "量价", "创出20日收盘突破", 7m, indicator.Is20DayBreakout, $"收盘 {indicator.Close:0.##}");
-        AddRule(details, "turnoverRange", "量价", "换手率在2%-8%", 4m, turnoverRate is >= 2m and <= 8m, $"当前 {turnoverRate:0.##}%");
-        AddRule(details, "averageAmount20d", "量价", "20日均成交额达标", profile.AverageAmount20d is >= 500_000_000m ? 4m : 2m, true, $"当前 {(profile.AverageAmount20d / 100_000_000m):0.##} 亿");
-        AddRule(details, "industryRank", "量价", "行业20日强度排名前10", 5m, (industry?.Rank20d ?? int.MaxValue) <= 10, $"当前排名 {industry?.Rank20d?.ToString() ?? "无"}");
+        var rawTurnoverRate = profile.TurnoverRate ?? indicator.TurnoverRate ?? 0m;
+        var turnoverRate = rawTurnoverRate <= 1m ? rawTurnoverRate * 100m : rawTurnoverRate;
+        var atrPct = indicator.Close == 0m ? 0m : indicator.Atr14 / indicator.Close * 100m;
+        AddRule(details, "amountRatio1d", "量价确认", "放量确认", 6m, resolvedContext.AmountRatio1d >= 1.5m, $"当前 {resolvedContext.AmountRatio1d:0.##}x");
+        AddRule(details, "turnoverHealthy", "量价确认", "换手率健康", 4m, turnoverRate is >= 2m and <= 8m, $"当前 {turnoverRate:0.##}%");
+        AddRule(details, "liquidityExcellent", "量价确认", "流动性优秀", 4m, profile.AverageAmount20d >= 1_500_000_000m, $"当前 {(profile.AverageAmount20d / 100_000_000m):0.##} 亿");
+        AddRule(details, "liquidityGood", "量价确认", "流动性良好", 2m, profile.AverageAmount20d is >= 500_000_000m and < 1_500_000_000m, $"当前 {(profile.AverageAmount20d / 100_000_000m):0.##} 亿");
+        AddRule(details, "amountNotShrinking", "量价确认", "成交额未明显萎缩", 3m, resolvedContext.AmountRatio1d >= 0.8m, $"当前 {resolvedContext.AmountRatio1d:0.##}x");
+        AddRule(details, "volumePriceStable", "量价确认", "量价配合稳定", 3m, turnoverRate <= 12m && resolvedContext.Return10d <= 25m, $"换手 {turnoverRate:0.##}% / 10日涨幅 {resolvedContext.Return10d:0.##}%");
+        AddRule(details, "industryTop10", "量价确认", "行业强度前10（观察）", 0m, (industry?.Rank20d ?? int.MaxValue) <= 10, $"当前排名 {industry?.Rank20d?.ToString() ?? "无"}");
+        AddRule(details, "fundFlow1dPositive", "量价确认", "1日主力净流入为正（观察）", 0m, (resolvedContext.StockFundFlow?.MainNetPct ?? 0m) > 0m, $"当前 {resolvedContext.StockFundFlow?.MainNetPct?.ToString("0.##") ?? "无"}%");
+        AddRule(details, "fundFlow5dPercentile", "量价确认", "5日资金流分位较高（观察）", 0m, (resolvedContext.StockFundFlow?.RankPercentile5d ?? 0m) >= 80m, $"当前 {resolvedContext.StockFundFlow?.RankPercentile5d?.ToString("0.##") ?? "无"}");
+        AddRule(details, "industryFundFlowPercentile", "量价确认", "行业资金流较强（观察）", 0m, (resolvedContext.IndustryFundFlow?.RankPercentile ?? 0m) >= 80m, $"当前 {resolvedContext.IndustryFundFlow?.RankPercentile?.ToString("0.##") ?? "无"}");
+        AddRule(details, "lhbInstitutionNetBuy", "量价确认", "机构净买入（观察）", 0m, resolvedContext.Lhb?.IsInstitutionNetBuy == true, resolvedContext.Lhb?.Reason ?? "无");
 
-        AddRule(details, "netProfitYoy", "基本面", "净利润同比为正", 5m, (financial?.NetProfitYoy ?? 0m) > 0m, $"当前 {financial?.NetProfitYoy?.ToString("0.##") ?? "无"}%");
-        AddRule(details, "revenueYoy", "基本面", "营收同比为正", 4m, (financial?.RevenueYoy ?? 0m) > 0m, $"当前 {financial?.RevenueYoy?.ToString("0.##") ?? "无"}%");
-        AddRule(details, "roe", "基本面", "ROE 不低于 8", 5m, (financial?.Roe ?? 0m) >= 8m, $"当前 {financial?.Roe?.ToString("0.##") ?? "无"}");
-        AddRule(details, "pe", "基本面", "PE 位于 0-80", 3m, (financial?.Pe ?? profile.Pe) is > 0m and <= 80m, $"当前 {(financial?.Pe ?? profile.Pe)?.ToString("0.##") ?? "无"}");
-        AddRule(details, "pb", "基本面", "PB 位于 0-8", 3m, (financial?.Pb ?? profile.Pb) is > 0m and <= 8m, $"当前 {(financial?.Pb ?? profile.Pb)?.ToString("0.##") ?? "无"}");
+        AddRule(details, "riskAtrControlled", "风险纪律", "波动率可控", 2m, atrPct <= 5m, $"ATR/收盘 {atrPct:0.##}%");
+        AddRule(details, "riskNotOverheated", "风险纪律", "短期涨幅不过热", 3m, resolvedContext.Return10d <= 20m, $"当前 {resolvedContext.Return10d:0.##}%");
+        AddRule(details, "riskNearMa20", "风险纪律", "不明显追高", 2m, indicator.DistanceToMa20Pct <= 8m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
+        AddRule(details, "riskTurnoverNotOverheated", "风险纪律", "换手不过热", 2m, turnoverRate <= 12m, $"当前 {turnoverRate:0.##}%");
+        AddRule(details, "riskNormalDistance", "风险纪律", "仍在计划容忍区", 1m, indicator.DistanceToMa20Pct <= 12m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
+        AddPenaltyRule(details, "turnoverOverheated", "风险纪律", "换手过热", 1m, turnoverRate > 12m, $"当前 {turnoverRate:0.##}%");
+        AddPenaltyRule(details, "turnoverSpeculative", "风险纪律", "极端换手风险", 1m, turnoverRate > 20m, $"当前 {turnoverRate:0.##}%");
+        AddPenaltyRule(details, "lhbRiskFlag", "风险纪律", "龙虎榜风险标签", 1m, !string.IsNullOrWhiteSpace(resolvedContext.Lhb?.RiskFlags), resolvedContext.Lhb?.RiskFlags ?? "无");
+
+        var financialIsUsable = IsFinancialReportUsable(profile.SnapshotDate, financial);
+        var scoringFinancial = financialIsUsable ? financial : null;
+        AddRule(details, "financialFreshness", "基本面质量", "财报时效有效", 0m, financialIsUsable, financial is null ? "无" : $"报告期 {financial.ReportDate:yyyy-MM-dd}");
+        AddRule(details, "roe", "基本面质量", "ROE健康", 4m, (scoringFinancial?.Roe ?? 0m) >= 8m, $"当前 {scoringFinancial?.Roe?.ToString("0.##") ?? "无"}");
+        AddRule(details, "revenueYoy", "基本面质量", "营收同比为正", 3m, (scoringFinancial?.RevenueYoy ?? 0m) > 0m, $"当前 {scoringFinancial?.RevenueYoy?.ToString("0.##") ?? "无"}%");
+        AddRule(details, "netProfitYoy", "基本面质量", "净利润同比为正", 3m, (scoringFinancial?.NetProfitYoy ?? 0m) > 0m, $"当前 {scoringFinancial?.NetProfitYoy?.ToString("0.##") ?? "无"}%");
+        AddRule(details, "cashFlowPositive", "基本面质量", "经营现金流为正", 2m, (scoringFinancial?.OperatingCashFlow ?? scoringFinancial?.OperatingCashFlowNet ?? 0m) > 0m, $"当前 {(scoringFinancial?.OperatingCashFlow ?? scoringFinancial?.OperatingCashFlowNet)?.ToString("0.##") ?? "无"}");
+        AddRule(details, "qualityGuard", "基本面质量", "毛利率/负债率无极端异常", 1m, IsFinancialQualityHealthy(scoringFinancial), $"毛利率 {scoringFinancial?.GrossMargin?.ToString("0.##") ?? "无"} / 负债率 {scoringFinancial?.DebtToAssetRatio?.ToString("0.##") ?? "无"}");
+        AddRule(details, "valuationGuard", "基本面质量", "估值无极端异常", 2m, (scoringFinancial?.Pe ?? profile.Pe) is > 0m && (scoringFinancial?.Pb ?? profile.Pb) is > 0m and <= 8m, $"PE {(scoringFinancial?.Pe ?? profile.Pe)?.ToString("0.##") ?? "无"} / PB {(scoringFinancial?.Pb ?? profile.Pb)?.ToString("0.##") ?? "无"}");
 
         var relativeStrength = details.Where(static item => item.Dimension == "相对强弱").Sum(static item => item.Score);
-        var trend = details.Where(static item => item.Dimension == "趋势").Sum(static item => item.Score);
-        var volumePrice = details.Where(static item => item.Dimension == "量价").Sum(static item => item.Score);
-        var fundamental = details.Where(static item => item.Dimension == "基本面").Sum(static item => item.Score);
+        var trend = details.Where(static item => item.Dimension == "趋势质量").Sum(static item => item.Score);
+        var volumePrice = Math.Max(0m, details.Where(static item => item.Dimension == "量价确认").Sum(static item => item.Score));
+        var fundamental = details.Where(static item => item.Dimension == "基本面质量").Sum(static item => item.Score);
+        var riskDiscipline = Math.Max(0m, details.Where(static item => item.Dimension == "风险纪律").Sum(static item => item.Score));
 
-        return new CandidateScoreBreakdown(relativeStrength, trend, volumePrice, fundamental, details);
+        var financialMissingCount = 0;
+        if (scoringFinancial?.Roe is null) financialMissingCount++;
+        if (scoringFinancial?.RevenueYoy is null) financialMissingCount++;
+        if (scoringFinancial?.NetProfitYoy is null) financialMissingCount++;
+        if (financialMissingCount >= 3)
+        {
+            fundamental = Math.Min(fundamental, 4m);
+        }
+
+        if (!financialIsUsable)
+        {
+            fundamental = 0m;
+        }
+
+        return new CandidateScoreBreakdown(relativeStrength, trend, volumePrice, fundamental, riskDiscipline, details);
     }
 
     /// <summary>
@@ -399,7 +498,7 @@ public static class CandidatePolicy
             return CandidateGrade.A;
         }
 
-        if (totalScore >= 85m)
+        if (totalScore >= 88m)
         {
             return CandidateGrade.B;
         }
@@ -431,7 +530,7 @@ public static class CandidatePolicy
 
         if (totalScore < StrongWatchMinimumScore)
         {
-            return new CandidateEligibilityDecision(false, "study_only", "评分低于 85 分，仅作为学习观察。");
+            return new CandidateEligibilityDecision(false, "study_only", "评分低于 88 分，仅作为学习观察。");
         }
 
         if (totalScore < TradableMinimumScore)
@@ -439,9 +538,9 @@ public static class CandidatePolicy
             return new CandidateEligibilityDecision(false, "strong_watch", "评分达到强观察区间，但还未达到 90 分可执行门槛。");
         }
 
-        if (riskReward < 2m)
+        if (riskReward < 1.8m)
         {
-            return new CandidateEligibilityDecision(false, "observe_only", "预期盈亏比低于 2，只保留观察。");
+            return new CandidateEligibilityDecision(false, "observe_only", "预期盈亏比低于 1.8，只保留观察。");
         }
 
         return new CandidateEligibilityDecision(true, "tradable", "满足当前执行条件。");
@@ -460,6 +559,40 @@ public static class CandidatePolicy
         string evidence)
     {
         details.Add(new ScoreRuleDetail(key, dimension, label, hit ? maxScore : 0m, maxScore, hit, evidence));
+    }
+
+    private static bool IsFinancialReportUsable(DateOnly tradeDate, FinancialSnapshot? financial)
+    {
+        if (financial is null)
+        {
+            return false;
+        }
+
+        return financial.ReportDate >= tradeDate.AddDays(-370);
+    }
+
+    private static bool IsFinancialQualityHealthy(FinancialSnapshot? financial)
+    {
+        if (financial is null)
+        {
+            return false;
+        }
+
+        var grossMarginHealthy = financial.GrossMargin is null or > 0m;
+        var debtHealthy = financial.DebtToAssetRatio is null or (>= 0m and <= 85m);
+        return grossMarginHealthy && debtHealthy;
+    }
+
+    private static void AddPenaltyRule(
+        ICollection<ScoreRuleDetail> details,
+        string key,
+        string dimension,
+        string label,
+        decimal penaltyScore,
+        bool hit,
+        string evidence)
+    {
+        details.Add(new ScoreRuleDetail(key, dimension, label, hit ? -penaltyScore : 0m, penaltyScore, hit, evidence));
     }
 
     /// <summary>
@@ -508,16 +641,100 @@ public static class CandidatePolicy
         MarketRegimeSnapshot regime,
         CandidateScoreBreakdown breakdown,
         decimal riskReward,
-        string eligibilityReason)
+        string eligibilityReason,
+        CandidateScoringContext context)
     {
-        return
-            $"{profile.StockName} 当前总分 {breakdown.TotalScore:0.#} 分。"
-            + $"市场环境：{FormatMarketRegime(regime.Regime)}。"
-            + $"行业强度排名：{industry?.Rank20d?.ToString() ?? "暂无"}。"
-            + $"收盘价 {indicator.Close:0.##}，MA20 {indicator.Ma20:0.##}，MA60 {indicator.Ma60:0.##}。"
-            + $"风险收益比 {riskReward:0.##}。"
-            + eligibilityReason;
+        var strengths = new List<string>();
+        var risks = new List<string>();
+
+        if (indicator.RelativeStrengthScore >= 80m)
+        {
+            strengths.Add($"相对强度分位 {indicator.RelativeStrengthScore:0.#}");
+        }
+
+        if (indicator.IsBullishStacked)
+        {
+            strengths.Add("均线多头排列");
+        }
+
+        if (indicator.IsMa20Upward)
+        {
+            strengths.Add("MA20 保持上行");
+        }
+
+        if (indicator.Is20DayBreakout)
+        {
+            strengths.Add("出现 20 日收盘突破");
+        }
+
+        if ((industry?.Rank20d ?? int.MaxValue) <= 10)
+        {
+            strengths.Add($"行业强度排名前 {industry!.Rank20d}");
+        }
+
+        if ((context.AmountRatio1d) >= 1.5m)
+        {
+            strengths.Add($"放量系数 {context.AmountRatio1d:0.##}x");
+        }
+
+        if ((context.StockFundFlow?.MainNetPct ?? 0m) > 0m)
+        {
+            strengths.Add($"主力净流入 {context.StockFundFlow!.MainNetPct:0.##}%");
+        }
+
+        if (context.Lhb?.IsInstitutionNetBuy == true)
+        {
+            strengths.Add("龙虎榜机构净买入");
+        }
+
+        if (indicator.DistanceToMa20Pct > 10m)
+        {
+            risks.Add($"距离 MA20 偏离 {indicator.DistanceToMa20Pct:0.##}%");
+        }
+
+        if ((context.Return10d) > 25m)
+        {
+            risks.Add($"近 10 日涨幅偏热 {context.Return10d:0.##}%");
+        }
+
+        if ((context.StockFundFlow?.MainNetPct ?? 0m) < 0m)
+        {
+            risks.Add($"主力净流出 {context.StockFundFlow!.MainNetPct:0.##}%");
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.Lhb?.RiskFlags))
+        {
+            risks.Add($"龙虎榜风险标签：{context.Lhb.RiskFlags}");
+        }
+
+        if (riskReward < 1.8m)
+        {
+            risks.Add($"风险收益比仅 {riskReward:0.##}");
+        }
+
+        var summary = $"{profile.StockName} 当前总分 {breakdown.TotalScore:0.#} 分，处于{FormatMarketRegime(regime.Regime)}环境，现阶段结论：{eligibilityReason}";
+        var trendLine = $"趋势上，收盘 {indicator.Close:0.##}，MA20 {indicator.Ma20:0.##}，MA60 {indicator.Ma60:0.##}，风险收益比 {riskReward:0.##}。";
+        var strengthLine = strengths.Count > 0
+            ? $"主要加分项：{string.Join("、", strengths.Take(4))}。"
+            : "主要加分项：当前没有特别突出的强确认信号。";
+        var riskLine = risks.Count > 0
+            ? $"需要留意：{string.Join("、", risks.Take(3))}。"
+            : "需要留意：当前没有明显的额外风险标签，重点仍是按计划执行。";
+
+        return $"{summary}{trendLine}{strengthLine}{riskLine}";
     }
+
+    private static CandidateScoringContext BuildDefaultContext(IndicatorSnapshot indicator, IndustryDailyStat? industry)
+        => new(
+            0m,
+            0m,
+            0m,
+            industry?.PctChange20d,
+            false,
+            0m,
+            null,
+            null,
+            null);
 
     /// <summary>
     /// 将市场环境枚举转成中文说明。

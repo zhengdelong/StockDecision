@@ -20,8 +20,11 @@ Implementation must follow:
 - `docs/stock-decision-system/03-data-source-and-fields.md`
 - `docs/stock-decision-system/04-backtest-rules.md`
 - `docs/stock-decision-system/05-learning-and-review.md`
+- `docs/stock-decision-system/06-scoring-and-execution-v2.md`
 
 If code behavior conflicts with strategy documents, the documents win until a new strategy version is explicitly created.
+
+For all work related to scoring, fund-flow ingestion, 龙虎榜 ingestion, trade execution plans, position management advice, and v2 backtest behavior, `06-scoring-and-execution-v2.md` is the primary source of truth.
 
 ## DDD Dependency Rules
 
@@ -238,6 +241,26 @@ Steps:
 - [ ] Show candidates with score breakdown, strategy type, stop price, target price, and risk-reward ratio.
 - [ ] Explain MA20, MA60, ATR14, relative strength, PE, PB, and ROE in beginner language.
 - [ ] Hide “可买” until the current strategy version has acceptable backtest status.
+
+## Task 9: Scoring And Execution v2
+
+This task upgrades the system from a score-only signal engine to a score + execution-plan decision system.
+
+Required specification:
+
+- `docs/stock-decision-system/06-scoring-and-execution-v2.md`
+
+Steps:
+
+- [ ] Add raw fund-flow and 龙虎榜 tables to the collector layer, with normalized fields and audit metadata.
+- [ ] Add market/domain snapshots for fund-flow and 龙虎榜 summaries.
+- [ ] Replace the v1 score logic with the v2 score dimensions, weights, and de-duplicated rules.
+- [ ] Keep risk-reward as an execution gate instead of a major scoring source.
+- [ ] Add trade execution plans for candidates, signals, and stock detail responses.
+- [ ] Add position-management advice for held positions.
+- [ ] Update backtests so entry, invalidation, holding-day limits, and exits follow the same v2 execution rules.
+- [ ] Update frontend drawers and position pages to show trade plan, fund-flow, 龙虎榜, and holding advice.
+- [ ] Preserve strategy version separation between v1 and v2 results.
 
 ## Acceptance Criteria
 

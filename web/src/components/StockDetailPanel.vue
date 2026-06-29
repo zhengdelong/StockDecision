@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
-import type { ScoreRuleDetail, StockDetailResponse } from '../types'
+import type { ScoreRuleDetail, StockDetailResponse, TradeExecutionPlan } from '../types'
 import { formatNumber, formatPercent } from '../utils/formatters'
 import {
   buildChartStats,
@@ -30,6 +30,26 @@ const props = defineProps<{
 
 const recentBarsPreview = computed(() => props.stockDetail?.recentBars.slice(-5).reverse() ?? [])
 const headlineScore = computed(() => props.stockDetail?.candidate?.totalScore ?? props.stockDetail?.signal?.totalScore ?? null)
+const hasDifferentScoringIndustry = computed(() => {
+  const detail = props.stockDetail
+  return !!detail?.scoringIndustryName && detail.scoringIndustryName !== detail.industryName
+})
+
+function formatScoreCell(detail: ScoreRuleDetail): string {
+  if (detail.maxScore === 0) {
+    return detail.hit ? '有效' : '失效'
+  }
+
+  return `${formatNumber(detail.score, 0)} / ${formatNumber(detail.maxScore, 0)}`
+}
+
+function formatHitCell(detail: ScoreRuleDetail): string {
+  if (detail.maxScore === 0) {
+    return detail.hit ? '有效' : '失效'
+  }
+
+  return detail.hit ? '是' : '否'
+}
 
 const latestChangePct = computed(() => {
   const bars = props.stockDetail?.recentBars ?? []
@@ -125,6 +145,133 @@ const explanationHighlights = computed(() => {
   ].filter((item): item is string => Boolean(item))
 })
 
+const decisionSummaryCards = computed(() => {
+  const detail = props.stockDetail
+  if (!detail) {
+    return []
+  }
+
+  const candidate = detail.candidate
+  const signal = detail.signal
+  const plan = resolvedExecutionPlan.value
+  const cards = []
+
+  cards.push({
+    key: 'score',
+    tone: candidate?.totalScore != null && candidate.totalScore >= 90 ? 'reward' : 'neutral',
+    label: '当前结论',
+    value: signal ? '可执行信号' : candidate ? candidate.eligibilityStatus : '仅详情观察',
+    detail: candidate ? `${candidate.strategyType} · 总分 ${formatNumber(candidate.totalScore, 1)}` : '暂无候选评分结果',
+  })
+
+  cards.push({
+    key: 'trend',
+    tone: detail.indicator?.isBullishStacked ? 'reward' : 'neutral',
+    label: '趋势状态',
+    value: detail.indicator?.isBullishStacked ? '多头趋势' : '趋势待确认',
+    detail: detail.indicator
+      ? `MA20 ${detail.indicator.isMa20Upward ? '上行' : '走平'} · 20日收益 ${formatPercent(detail.indicator.return20d)}`
+      : '暂无指标快照',
+  })
+
+  cards.push({
+    key: 'capital',
+    tone: signal ? 'reward' : plan ? 'neutral' : 'risk',
+    label: '执行动作',
+    value: signal ? '按计划跟踪' : plan ? '等待触发' : '暂无计划',
+    detail: plan
+      ? `触发 ${formatNumber(plan.triggerPrice)} · 止损 ${formatNumber(plan.stopLossPrice)} · 目标 ${formatNumber(plan.targetPrice)}`
+      : '当前没有生成执行计划',
+  })
+
+  return cards
+})
+
+const fundFlowInsight = computed(() => {
+  const fundFlow = props.stockDetail?.fundFlow
+  if (!fundFlow) {
+    return null
+  }
+
+  const stockPositive = (fundFlow.mainNetPct ?? 0) > 0
+  const industryPositive = (fundFlow.industryMainNetPct ?? 0) > 0
+  const percentile = fundFlow.rankPercentile5d ?? 0
+  const industryPercentile = fundFlow.industryRankPercentile ?? 0
+
+  if (stockPositive && industryPositive && percentile >= 80 && industryPercentile >= 80) {
+    return '资金确认较强：个股与所属行业都处于净流入状态，且分位靠前，说明这波上涨不只是单点异动。'
+  }
+
+  if (stockPositive && industryPositive) {
+    return '资金确认偏正面：个股和行业资金都没有拖后腿，可以把它看成趋势延续的辅助证据。'
+  }
+
+  if (!stockPositive && industryPositive) {
+    return '行业资金偏强，但个股主力资金跟进还不够，说明板块热度在，个股承接还要继续观察。'
+  }
+
+  if (stockPositive && !industryPositive) {
+    return '个股有资金承接，但行业资金没有同步转强，更像局部博弈，持续性要打折。'
+  }
+
+  return '资金确认偏弱：个股和行业都没有给出明显净流入信号，当前更适合当作评分参考，而不是独立买点理由。'
+})
+
+const lhbInsight = computed(() => {
+  const lhb = props.stockDetail?.lhb
+  if (!lhb) {
+    return null
+  }
+
+  if (lhb.isOnLhbToday && lhb.isInstitutionNetBuy) {
+    return '龙虎榜偏正面：今天上榜且机构净买入为正，说明短线关注度高，同时有一定机构参与度。'
+  }
+
+  if (lhb.isOnLhbToday && lhb.riskFlags) {
+    return `龙虎榜有分歧：虽然今天上榜，但伴随风险标签 ${lhb.riskFlags}，需要防止情绪过热后的大波动。`
+  }
+
+  if (lhb.recent20dLhbCount >= 2) {
+    return '近期多次上榜，说明这只票处在资金反复博弈区，弹性通常更高，但波动也更大。'
+  }
+
+  return '龙虎榜没有给出太强的额外确认信号，可以把它视为中性信息。'
+})
+
+const executionChecklist = computed(() => {
+  const plan = resolvedExecutionPlan.value
+  const scenario = executionScenario.value
+  if (!plan) {
+    return []
+  }
+
+  return [
+    {
+      key: 'trigger',
+      tone: 'neutral',
+      label: '买入前',
+      value: `等价格接近 ${formatNumber(plan.triggerPrice)}`,
+      detail: `若高开超过 ${formatPercent(plan.maxEntryGapPct)} 或未满足计划中的买入规则，先不追。`,
+    },
+    {
+      key: 'risk',
+      tone: scenario && scenario.riskPct >= 5 ? 'risk' : 'neutral',
+      label: '止损纪律',
+      value: `失守 ${formatNumber(plan.stopLossPrice)} 就退出`,
+      detail: scenario
+        ? `按建议股数估算，单笔最大亏损约 ${formatNumber(scenario.riskAmount, 0)}。`
+        : '优先遵守固定止损，不用主观扛单。',
+    },
+    {
+      key: 'profit',
+      tone: plan.riskRewardRatio >= 2 ? 'reward' : 'neutral',
+      label: '止盈预期',
+      value: `先看 ${formatNumber(plan.targetPrice)}`,
+      detail: `当前风险收益比 ${formatNumber(plan.riskRewardRatio)}，持仓最长 ${plan.maxHoldingDays} 天。`,
+    },
+  ]
+})
+
 /**
  * 用最近一根 K 线与近几日均量生成直观解读，降低用户读图门槛。
  */
@@ -174,24 +321,25 @@ const priceVolumeInsight = computed(() => {
  * 把执行计划转成更直观的仓位推演，方便非专业用户理解一笔交易要承担的风险。
  */
 const executionScenario = computed(() => {
-  const signal = props.stockDetail?.signal
-  if (!signal || signal.triggerPrice <= 0) {
+  const plan = resolvedExecutionPlan.value
+  if (!plan || plan.triggerPrice <= 0) {
     return null
   }
 
-  const riskPerShare = Math.max(signal.triggerPrice - signal.stopLossPrice, 0)
-  const rewardPerShare = Math.max(signal.targetPrice - signal.triggerPrice, 0)
-  const estimatedCost = signal.triggerPrice * Math.max(signal.estimatedShares, 0)
-  const riskAmount = riskPerShare * Math.max(signal.estimatedShares, 0)
-  const rewardAmount = rewardPerShare * Math.max(signal.estimatedShares, 0)
-  const riskPct = signal.triggerPrice > 0 ? (riskPerShare / signal.triggerPrice) * 100 : 0
-  const rewardPct = signal.triggerPrice > 0 ? (rewardPerShare / signal.triggerPrice) * 100 : 0
-  const capitalUsagePct = signal.suggestedCapital > 0 ? (estimatedCost / signal.suggestedCapital) * 100 : 0
+  const shares = Math.max(plan.estimatedShares ?? 0, 0)
+  const riskPerShare = Math.max(plan.triggerPrice - plan.stopLossPrice, 0)
+  const rewardPerShare = Math.max(plan.targetPrice - plan.triggerPrice, 0)
+  const estimatedCost = plan.triggerPrice * shares
+  const riskAmount = riskPerShare * shares
+  const rewardAmount = rewardPerShare * shares
+  const riskPct = plan.triggerPrice > 0 ? (riskPerShare / plan.triggerPrice) * 100 : 0
+  const rewardPct = plan.triggerPrice > 0 ? (rewardPerShare / plan.triggerPrice) * 100 : 0
+  const capitalUsagePct = (plan.suggestedCapital ?? 0) > 0 ? (estimatedCost / (plan.suggestedCapital ?? 0)) * 100 : 0
 
   let judgement = '仓位与止损设置基本可执行，重点看触发后是否有持续放量。'
   if (riskPct >= 5) {
     judgement = '单笔止损空间偏大，若要参与，最好降低仓位，避免一笔交易吃掉过多回撤。'
-  } else if (signal.riskRewardRatio < 2) {
+  } else if (plan.riskRewardRatio < 2) {
     judgement = '风险收益比偏弱，除非你对趋势延续有更强把握，否则不算理想出手点。'
   } else if (capitalUsagePct > 105) {
     judgement = '按当前触发价估算，建议股数略高于建议资金，执行时需要向下取整控制仓位。'
@@ -212,6 +360,24 @@ const executionScenario = computed(() => {
   }
 })
 
+const resolvedExecutionPlan = computed<TradeExecutionPlan | null>(() => {
+  return props.stockDetail?.signal?.executionPlan ?? props.stockDetail?.candidate?.executionPlan ?? null
+})
+
+const executionSections = computed(() => {
+  const plan = resolvedExecutionPlan.value
+  if (!plan) {
+    return []
+  }
+
+  return [
+    { key: 'entry', title: '买入规则', items: plan.entryRules },
+    { key: 'hold', title: '持有规则', items: plan.holdRules },
+    { key: 'exit', title: '卖出规则', items: plan.exitRules },
+    { key: 'invalidate', title: '失效条件', items: plan.invalidationRules },
+  ]
+})
+
 </script>
 
 <template>
@@ -229,7 +395,10 @@ const executionScenario = computed(() => {
               <strong>{{ formatNumber(headlineScore, 1) }}</strong>
             </div>
           </div>
-          <p class="muted">{{ props.stockDetail.industryName ?? '未知行业' }}</p>
+          <div class="detail-industry-lines">
+            <p class="muted">展示行业：{{ props.stockDetail.industryName ?? '未知行业' }}</p>
+            <p v-if="hasDifferentScoringIndustry" class="muted">评分行业：{{ props.stockDetail.scoringIndustryName }}</p>
+          </div>
         </div>
         <div class="detail-badges">
           <span class="pill neutral">{{ props.stockDetail.tradeDate }}</span>
@@ -237,6 +406,22 @@ const executionScenario = computed(() => {
           <span class="pill soft">{{ resolveDistanceLabel(props.stockDetail) }}</span>
         </div>
       </header>
+
+      <section v-if="decisionSummaryCards.length" class="detail-block">
+        <div class="panel-head">
+          <div>
+            <p class="card-label">决策摘要</p>
+            <h3>先看结论，再看细节</h3>
+          </div>
+        </div>
+        <div class="decision-grid">
+          <article v-for="card in decisionSummaryCards" :key="card.key" :class="['decision-card', card.tone]">
+            <span>{{ card.label }}</span>
+            <strong>{{ card.value }}</strong>
+            <small>{{ card.detail }}</small>
+          </article>
+        </div>
+      </section>
 
       <section class="detail-block chart-block">
         <div class="panel-head">
@@ -373,8 +558,8 @@ const executionScenario = computed(() => {
                 <tbody>
                   <tr v-for="detail in group.items" :key="detail.key">
                     <td>{{ detail.label }}</td>
-                    <td>{{ formatNumber(detail.score, 0) }} / {{ formatNumber(detail.maxScore, 0) }}</td>
-                    <td>{{ detail.hit ? '是' : '否' }}</td>
+                    <td>{{ formatScoreCell(detail) }}</td>
+                    <td>{{ formatHitCell(detail) }}</td>
                     <td>{{ detail.evidence }}</td>
                   </tr>
                 </tbody>
@@ -389,20 +574,29 @@ const executionScenario = computed(() => {
         <p class="detail-copy">{{ props.stockDetail.candidate.explanation }}</p>
       </section>
 
-      <section v-if="props.stockDetail.signal" class="detail-block">
+      <section v-if="resolvedExecutionPlan" class="detail-block">
         <div class="panel-head">
           <div>
             <p class="card-label">执行计划</p>
-            <h3>信号设置</h3>
+            <h3>规则化计划</h3>
           </div>
         </div>
         <div class="detail-grid">
-          <div><span>触发价</span><strong>{{ formatNumber(props.stockDetail.signal.triggerPrice) }}</strong></div>
-          <div><span>止损价</span><strong>{{ formatNumber(props.stockDetail.signal.stopLossPrice) }}</strong></div>
-          <div><span>目标价</span><strong>{{ formatNumber(props.stockDetail.signal.targetPrice) }}</strong></div>
-          <div><span>风险收益比</span><strong>{{ formatNumber(props.stockDetail.signal.riskRewardRatio) }}</strong></div>
-          <div><span>建议资金</span><strong>{{ formatNumber(props.stockDetail.signal.suggestedCapital, 0) }}</strong></div>
-          <div><span>建议股数</span><strong>{{ props.stockDetail.signal.estimatedShares }}</strong></div>
+          <div><span>计划类型</span><strong>{{ resolvedExecutionPlan.planType }}</strong></div>
+          <div><span>当前状态</span><strong>{{ resolvedExecutionPlan.status }}</strong></div>
+          <div><span>触发价</span><strong>{{ formatNumber(resolvedExecutionPlan.triggerPrice) }}</strong></div>
+          <div><span>止损价</span><strong>{{ formatNumber(resolvedExecutionPlan.stopLossPrice) }}</strong></div>
+          <div><span>目标价</span><strong>{{ formatNumber(resolvedExecutionPlan.targetPrice) }}</strong></div>
+          <div><span>风险收益比</span><strong>{{ formatNumber(resolvedExecutionPlan.riskRewardRatio) }}</strong></div>
+          <div><span>观察期</span><strong>{{ resolvedExecutionPlan.observationDays }} 天</strong></div>
+          <div><span>持仓上限</span><strong>{{ resolvedExecutionPlan.maxHoldingDays }} 天</strong></div>
+          <div><span>允许高开</span><strong>{{ formatPercent(resolvedExecutionPlan.maxEntryGapPct) }}</strong></div>
+          <div><span>建议资金</span><strong>{{ formatNumber(resolvedExecutionPlan.suggestedCapital, 0) }}</strong></div>
+          <div><span>建议股数</span><strong>{{ resolvedExecutionPlan.estimatedShares ?? '--' }}</strong></div>
+        </div>
+        <div class="execution-note">
+          <strong>计划摘要</strong>
+          <span>{{ resolvedExecutionPlan.summary }}</span>
         </div>
         <div v-if="executionScenario" class="scenario-grid">
           <div class="scenario-card risk">
@@ -430,6 +624,30 @@ const executionScenario = computed(() => {
           <strong>入场推演</strong>
           <span>{{ executionScenario.judgement }}</span>
         </div>
+        <div v-if="executionChecklist.length" class="decision-grid compact">
+          <article v-for="item in executionChecklist" :key="item.key" :class="['decision-card', item.tone]">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <small>{{ item.detail }}</small>
+          </article>
+        </div>
+        <div class="score-groups">
+          <details v-for="section in executionSections" :key="section.key" class="score-group-card" open>
+            <summary class="score-group-summary">
+              <div>
+                <strong>{{ section.title }}</strong>
+                <span>{{ section.items.length }} 条</span>
+              </div>
+            </summary>
+            <div class="mini-bars">
+              <div v-for="rule in section.items" :key="`${section.key}-${rule.label}`" class="mini-bar-row">
+                <span>{{ rule.label }}</span>
+                <strong>{{ rule.value }}</strong>
+                <small>{{ rule.description }}</small>
+              </div>
+            </div>
+          </details>
+        </div>
       </section>
 
       <section v-if="props.stockDetail.financial" class="detail-block">
@@ -446,6 +664,58 @@ const executionScenario = computed(() => {
           <div><span>营收同比</span><strong>{{ formatPercent(props.stockDetail.financial.revenueYoy) }}</strong></div>
           <div><span>净利润同比</span><strong>{{ formatPercent(props.stockDetail.financial.netProfitYoy) }}</strong></div>
           <div><span>报告期</span><strong>{{ props.stockDetail.financial.reportDate }}</strong></div>
+        </div>
+      </section>
+
+      <section v-if="props.stockDetail.fundFlow" class="detail-block">
+        <div class="panel-head">
+          <div>
+            <p class="card-label">资金流向</p>
+            <h3>主力与行业资金确认</h3>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <div><span>个股主力净额</span><strong>{{ formatNumber(props.stockDetail.fundFlow.mainNetAmount, 0) }}</strong></div>
+          <div><span>个股主力净占比</span><strong>{{ formatPercent(props.stockDetail.fundFlow.mainNetPct) }}</strong></div>
+          <div><span>超大单净额</span><strong>{{ formatNumber(props.stockDetail.fundFlow.superLargeNetAmount, 0) }}</strong></div>
+          <div><span>超大单净占比</span><strong>{{ formatPercent(props.stockDetail.fundFlow.superLargeNetPct) }}</strong></div>
+          <div><span>5日资金分位</span><strong>{{ formatPercent(props.stockDetail.fundFlow.rankPercentile5d) }}</strong></div>
+          <div><span>行业主力净额</span><strong>{{ formatNumber(props.stockDetail.fundFlow.industryMainNetAmount, 0) }}</strong></div>
+          <div><span>行业主力净占比</span><strong>{{ formatPercent(props.stockDetail.fundFlow.industryMainNetPct) }}</strong></div>
+          <div><span>行业资金排名</span><strong>{{ props.stockDetail.fundFlow.industryRank ?? '--' }}</strong></div>
+          <div><span>行业资金分位</span><strong>{{ formatPercent(props.stockDetail.fundFlow.industryRankPercentile) }}</strong></div>
+        </div>
+        <div v-if="fundFlowInsight" class="execution-note">
+          <strong>资金判断</strong>
+          <span>{{ fundFlowInsight }}</span>
+        </div>
+      </section>
+
+      <section v-if="props.stockDetail.lhb" class="detail-block">
+        <div class="panel-head">
+          <div>
+            <p class="card-label">龙虎榜事件</p>
+            <h3>机构参与与热度标签</h3>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <div><span>今日上榜</span><strong>{{ props.stockDetail.lhb.isOnLhbToday ? '是' : '否' }}</strong></div>
+          <div><span>上榜日期</span><strong>{{ props.stockDetail.lhb.tradeDate ?? '--' }}</strong></div>
+          <div><span>上榜原因</span><strong>{{ props.stockDetail.lhb.reason ?? '--' }}</strong></div>
+          <div><span>净买额</span><strong>{{ formatNumber(props.stockDetail.lhb.netAmount, 0) }}</strong></div>
+          <div><span>机构净买额</span><strong>{{ formatNumber(props.stockDetail.lhb.institutionNetAmount, 0) }}</strong></div>
+          <div><span>机构买入家数</span><strong>{{ props.stockDetail.lhb.institutionBuyCount ?? '--' }}</strong></div>
+          <div><span>机构净买入</span><strong>{{ props.stockDetail.lhb.isInstitutionNetBuy ? '是' : '否' }}</strong></div>
+          <div><span>20日上榜次数</span><strong>{{ props.stockDetail.lhb.recent20dLhbCount }}</strong></div>
+          <div><span>距上次上榜</span><strong>{{ props.stockDetail.lhb.daysSinceLastLhb ?? '--' }}</strong></div>
+        </div>
+        <div v-if="lhbInsight" class="execution-note">
+          <strong>龙虎榜判断</strong>
+          <span>{{ lhbInsight }}</span>
+        </div>
+        <div v-if="props.stockDetail.lhb.riskFlags" class="execution-note">
+          <strong>风险标签</strong>
+          <span>{{ props.stockDetail.lhb.riskFlags }}</span>
         </div>
       </section>
 

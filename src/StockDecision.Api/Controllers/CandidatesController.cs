@@ -21,3 +21,4 @@ public sealed class CandidatesController(GetCandidatesUseCase getCandidatesUseCa
         return Ok(response);
     }
 }
+

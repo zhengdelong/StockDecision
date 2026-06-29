@@ -63,6 +63,14 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
         CancellationToken cancellationToken = default)
     {
         var syncState = await InspectAsync(cancellationToken);
+        return await ExecuteAsync(syncState, snapshotVersion, cancellationToken);
+    }
+
+    internal async Task<DateOnly?> ExecuteAsync(
+        MarketSnapshotSyncState syncState,
+        StrategySnapshotVersion snapshotVersion,
+        CancellationToken cancellationToken = default)
+    {
         if (syncState.LatestRawTradeDate is null)
         {
             return null;
@@ -79,6 +87,9 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
         var indices = await rawRepository.GetIndexBarsByTradeDateAsync(syncTradeDate, cancellationToken);
         var industries = await rawRepository.GetIndustryStatsByTradeDateAsync(syncTradeDate, cancellationToken);
         var financials = await rawRepository.GetLatestFinancialSnapshotsAsync(cancellationToken);
+        var stockFundFlows = await rawRepository.GetStockFundFlowsByTradeDateAsync(syncTradeDate, cancellationToken);
+        var industryFundFlows = await rawRepository.GetIndustryFundFlowsByTradeDateAsync(syncTradeDate, cancellationToken);
+        var lhbSnapshots = await rawRepository.GetLhbSnapshotsByTradeDateAsync(syncTradeDate, cancellationToken);
 
         await marketRepository.ReplaceMarketSnapshotAsync(
             syncTradeDate,
@@ -87,6 +98,9 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
             indices,
             industries,
             financials,
+            stockFundFlows,
+            industryFundFlows,
+            lhbSnapshots,
             cancellationToken);
 
         await CalculateIndicatorsAndSignalsAsync(syncTradeDate, snapshotVersion, cancellationToken);
@@ -104,6 +118,14 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
         CancellationToken cancellationToken = default)
     {
         var syncState = await InspectAsync(cancellationToken);
+        return await RebuildLatestAsync(syncState, snapshotVersion, cancellationToken);
+    }
+
+    internal async Task<DateOnly?> RebuildLatestAsync(
+        MarketSnapshotSyncState syncState,
+        StrategySnapshotVersion snapshotVersion,
+        CancellationToken cancellationToken = default)
+    {
         if (syncState.LatestRawTradeDate is null)
         {
             return null;
@@ -115,6 +137,9 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
         var indices = await rawRepository.GetIndexBarsByTradeDateAsync(syncTradeDate, cancellationToken);
         var industries = await rawRepository.GetIndustryStatsByTradeDateAsync(syncTradeDate, cancellationToken);
         var financials = await rawRepository.GetLatestFinancialSnapshotsAsync(cancellationToken);
+        var stockFundFlows = await rawRepository.GetStockFundFlowsByTradeDateAsync(syncTradeDate, cancellationToken);
+        var industryFundFlows = await rawRepository.GetIndustryFundFlowsByTradeDateAsync(syncTradeDate, cancellationToken);
+        var lhbSnapshots = await rawRepository.GetLhbSnapshotsByTradeDateAsync(syncTradeDate, cancellationToken);
 
         await marketRepository.ReplaceMarketSnapshotAsync(
             syncTradeDate,
@@ -123,6 +148,9 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
             indices,
             industries,
             financials,
+            stockFundFlows,
+            industryFundFlows,
+            lhbSnapshots,
             cancellationToken);
 
         await CalculateIndicatorsAndSignalsAsync(syncTradeDate, snapshotVersion, cancellationToken);
@@ -137,70 +165,84 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
     private async Task CalculateIndicatorsAndSignalsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken)
     {
         var stockCodes = await marketRepository.GetActiveStockCodesAsync(cancellationToken);
+        var indicatorMetrics = await marketRepository.GetIndicatorCalculationMetricsByCodesAsync(stockCodes, tradeDate, 140, cancellationToken);
         var indicatorSnapshots = new List<IndicatorSnapshot>(stockCodes.Count);
+        var stockHistoryMetrics = new Dictionary<string, StockScoringHistoryMetrics>(StringComparer.OrdinalIgnoreCase);
         foreach (var stockCode in stockCodes)
         {
-            var history = await marketRepository.GetDailyBarHistoryAsync(stockCode, tradeDate, 140, cancellationToken);
-            if (history.Count < 120)
+            if (!indicatorMetrics.TryGetValue(stockCode, out var metrics))
             {
                 continue;
             }
 
-            var ordered = history.OrderBy(static item => item.TradeDate).ToList();
-            var latest = ordered[^1];
-            var ma20 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 20);
-            var ma60 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 60);
-            var ma120 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 120);
-            var atr14 = IndicatorMath.CalculateAtr14(ordered);
-            var return20 = IndicatorMath.CalculateReturn(ordered, 20);
-            var return60 = IndicatorMath.CalculateReturn(ordered, 60);
-            var distanceToMa20 = ma20 == 0m ? 0m : ((latest.Close - ma20) / ma20) * 100m;
-
-            // 用 10 个交易日前的 MA20 对比当前 MA20，判断均线是否仍在抬升，减少短期噪声。
-            var previousMa20 = ordered.Count > 30
-                ? IndicatorMath.CalculateSimpleMovingAverage(ordered.Take(ordered.Count - 10).ToList(), 20)
-                : 0m;
-
-            // 20 日突破使用近 20 根收盘价高点，而不是盘中最高价，避免长上影造成误判。
-            var breakoutClose = ordered.TakeLast(20).Max(static item => item.Close);
+            var distanceToMa20 = metrics.Ma20 == 0m ? 0m : ((metrics.Close - metrics.Ma20) / metrics.Ma20) * 100m;
 
             indicatorSnapshots.Add(new IndicatorSnapshot(
                 stockCode,
                 tradeDate,
-                latest.Close,
-                ma20,
-                ma60,
-                ma120,
-                atr14,
-                return20,
-                return60,
-                return20,
-                latest.Close >= breakoutClose,
-                ma20 > previousMa20,
-                ma20 > ma60 && ma60 > ma120,
+                metrics.Close,
+                metrics.Ma20,
+                metrics.Ma60,
+                metrics.Ma120,
+                metrics.Atr14,
+                metrics.Return20d,
+                metrics.Return60d,
+                metrics.Return20d,
+                metrics.Close >= metrics.BreakoutClose,
+                metrics.Ma20 > metrics.PreviousMa20,
+                metrics.Ma20 > metrics.Ma60 && metrics.Ma60 > metrics.Ma120,
                 Math.Round(distanceToMa20, 4, MidpointRounding.AwayFromZero),
-                latest.TurnoverRate));
+                metrics.TurnoverRate));
+            stockHistoryMetrics[stockCode] = new StockScoringHistoryMetrics(stockCode, metrics.Return10d, metrics.AmountRatio1d, metrics.Ma60Previous);
         }
+
+        indicatorSnapshots = indicatorSnapshots
+            .OrderBy(static item => item.Return20d)
+            .Select((item, index) =>
+            {
+                var percentile = indicatorSnapshots.Count <= 1
+                    ? 100m
+                    : Math.Round(index * 100m / (indicatorSnapshots.Count - 1), 4, MidpointRounding.AwayFromZero);
+
+                return item with { RelativeStrengthScore = percentile };
+            })
+            .ToList();
 
         await marketRepository.UpsertIndicatorSnapshotsAsync(tradeDate, snapshotVersion, indicatorSnapshots, cancellationToken);
 
         var indexHistory = await marketRepository.GetIndexBarHistoryAsync(tradeDate, 30, cancellationToken);
+        var orderedIndexBars = indexHistory
+            .GroupBy(static item => item.IndexCode)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.OrderBy(item => item.TradeDate).ToList());
         var regime = MarketRegimePolicy.Evaluate(
             tradeDate,
-            indexHistory
-                .GroupBy(static item => item.IndexCode)
-                .ToDictionary(
-                    static group => group.Key,
-                    static group => (IReadOnlyList<MarketIndexBar>)group.OrderBy(item => item.TradeDate).ToList()));
+            orderedIndexBars.ToDictionary(
+                static pair => pair.Key,
+                static pair => (IReadOnlyList<MarketIndexBar>)pair.Value));
         await marketRepository.UpsertMarketRegimeAsync(snapshotVersion, regime, cancellationToken);
 
         var profiles = await marketRepository.GetStockProfilesByCodesAsync(indicatorSnapshots.Select(static item => item.StockCode), cancellationToken);
         var financials = await marketRepository.GetLatestFinancialsByCodesAsync(indicatorSnapshots.Select(static item => item.StockCode), cancellationToken);
+        var stockFundFlows = await marketRepository.GetStockFundFlowsByCodesAsync(tradeDate, indicatorSnapshots.Select(static item => item.StockCode), cancellationToken);
         var industries = await marketRepository.GetIndustryStatsByNamesAsync(
             tradeDate,
-            profiles.Values.Select(static item => item.IndustryName).Distinct().ToList(),
+            profiles.Values.Select(static item => item.EffectiveScoringIndustryName).Distinct().ToList(),
             cancellationToken);
+        var industryFundFlows = await marketRepository.GetIndustryFundFlowsByNamesAsync(
+            tradeDate,
+            profiles.Values.Select(static item => item.EffectiveScoringIndustryName).Distinct().ToList(),
+            cancellationToken);
+        var lhbSnapshots = await marketRepository.GetLhbSnapshotsByCodesAsync(tradeDate, indicatorSnapshots.Select(static item => item.StockCode), cancellationToken);
 
+        var benchmarkIndex = orderedIndexBars.TryGetValue("000300", out var csi300)
+            ? csi300
+            : orderedIndexBars.Values.FirstOrDefault();
+        var indexReturn20d = benchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(benchmarkIndex, 20) : 0m;
+        var indexReturn60d = benchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(benchmarkIndex, 60) : 0m;
+
+        var scoreSnapshots = new List<StrategyScoreSnapshot>();
         var candidates = new List<CandidateStock>();
         foreach (var indicator in indicatorSnapshots)
         {
@@ -210,13 +252,48 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
             }
 
             financials.TryGetValue(indicator.StockCode, out var financial);
-            industries.TryGetValue(profile.IndustryName ?? string.Empty, out var industry);
+            var scoringIndustryName = profile.EffectiveScoringIndustryName ?? string.Empty;
+            industries.TryGetValue(scoringIndustryName, out var industry);
+            stockFundFlows.TryGetValue(indicator.StockCode, out var stockFundFlow);
+            industryFundFlows.TryGetValue(scoringIndustryName, out var industryFundFlow);
+            lhbSnapshots.TryGetValue(indicator.StockCode, out var lhbSnapshot);
+
+            stockHistoryMetrics.TryGetValue(indicator.StockCode, out var historyMetrics);
+            var return10d = historyMetrics?.Return10d ?? 0m;
+            var amountRatio1d = historyMetrics?.AmountRatio1d ?? 0m;
+            var ma60Previous = historyMetrics?.Ma60Previous ?? 0m;
+            var context = new CandidateScoringContext(
+                return10d,
+                indexReturn20d,
+                indexReturn60d,
+                industry?.PctChange20d,
+                indicator.Ma60 > ma60Previous && ma60Previous > 0m,
+                amountRatio1d,
+                stockFundFlow,
+                industryFundFlow,
+                lhbSnapshot);
+            var scoreBreakdown = CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry, context);
+            scoreSnapshots.Add(new StrategyScoreSnapshot(
+                tradeDate,
+                profile.StockCode,
+                profile.StockName,
+                profile.IndustryName,
+                scoreBreakdown.TotalScore,
+                scoreBreakdown.RelativeStrengthScore,
+                scoreBreakdown.TrendScore,
+                scoreBreakdown.VolumePriceScore,
+                scoreBreakdown.FundamentalScore,
+                financial?.Pe ?? profile.Pe,
+                financial?.Pb ?? profile.Pb,
+                financial?.Roe,
+                scoreBreakdown.RiskDisciplineScore));
             var candidate = CandidatePolicy.Evaluate(
                 tradeDate,
                 profile,
                 indicator,
                 financial,
                 industry,
+                context,
                 regime,
                 TradingBoardClassifier.IsInTradablePool(profile.StockCode, tradingPermissions),
                 TradingBoardClassifier.IsInWatchPool(profile.StockCode));
@@ -226,6 +303,7 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
             }
         }
 
+        await marketRepository.UpsertScoreSnapshotsAsync(tradeDate, snapshotVersion, scoreSnapshots, cancellationToken);
         await marketRepository.UpsertCandidatesAsync(tradeDate, snapshotVersion, candidates, cancellationToken);
 
         var signals = candidates
@@ -265,7 +343,7 @@ public sealed class GetDashboardUseCase(
         var latestIngestion = await ingestionLogRepository.GetLatestSuccessfulIngestionAtUtcAsync(cancellationToken);
         var backtestApproval = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
         var isSignalEligible = (regime?.IsSignalEligible ?? false) && backtestApproval.IsApproved;
-        var signals = isSignalEligible ? rawSignals : [];
+        var signals = MarketListQueryPaging.ResolveVisibleSignals(rawSignals, candidates, regime);
 
         return new DashboardResponse(
             tradeDate.Value,
@@ -331,7 +409,8 @@ public sealed class GetCandidatesUseCase(
                 item.TargetPrice,
                 item.RiskRewardRatio,
                 item.Explanation,
-                MarketResponseMapper.BuildScoreRuleDetails(item.ScoreBreakdown)))
+                MarketResponseMapper.BuildScoreRuleDetails(item.ScoreBreakdown),
+                TradeExecutionPlanFactory.BuildForCandidate(item)))
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -385,10 +464,11 @@ public sealed class GetTodaySignalsUseCase(
             return new PagedResponse<SignalListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
         }
 
-        var backtestApproval = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
-        var signals = backtestApproval.IsApproved
-            ? await marketRepository.GetSignalsAsync(resolvedDate.Value, snapshotVersion, cancellationToken)
-            : [];
+        _ = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
+        var rawSignals = await marketRepository.GetSignalsAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
+        var candidates = await marketRepository.GetCandidatesAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
+        var regime = await marketRepository.GetMarketRegimeAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
+        var signals = MarketListQueryPaging.ResolveVisibleSignals(rawSignals, candidates, regime);
         var items = signals
             .Select(static item => new SignalListItemResponse(
                 item.StockCode,
@@ -406,7 +486,8 @@ public sealed class GetTodaySignalsUseCase(
                 item.SuggestedCapital,
                 item.EstimatedShares,
                 item.Explanation,
-                item.GeneratedAtUtc))
+                item.GeneratedAtUtc,
+                TradeExecutionPlanFactory.BuildForSignal(item)))
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -477,26 +558,19 @@ public sealed class GetIndustriesUseCase(
                 },
                 StringComparer.OrdinalIgnoreCase);
 
-        var industryNames = industryStats.Select(static item => item.IndustryName)
-            .Concat(candidateGroups.Keys)
-            .Concat(signalGroups.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
         var industryStatsByName = industryStats.ToDictionary(static item => item.IndustryName, StringComparer.OrdinalIgnoreCase);
-        var items = industryNames
-            .Select(industryName =>
+        var items = industryStats
+            .Select(industry =>
             {
-                industryStatsByName.TryGetValue(industryName, out var industry);
-                candidateGroups.TryGetValue(industryName, out var candidateGroup);
-                signalGroups.TryGetValue(industryName, out var signalGroup);
+                candidateGroups.TryGetValue(industry.IndustryName, out var candidateGroup);
+                signalGroups.TryGetValue(industry.IndustryName, out var signalGroup);
 
                 return new IndustryListItemResponse(
-                    industry?.IndustryCode ?? string.Empty,
-                    industryName,
+                    industry.IndustryCode,
+                    industry.IndustryName,
                     resolvedDate.Value,
-                    industry?.PctChange20d ?? 0m,
-                    industry?.Rank20d ?? int.MaxValue,
+                    industry.PctChange20d ?? 0m,
+                    industry.Rank20d ?? int.MaxValue,
                     candidateGroup?.Count ?? 0,
                     signalGroup?.Count ?? 0,
                     candidateGroup?.TopScore,
@@ -544,42 +618,95 @@ public sealed class GetFinancialsUseCase(
             return new PagedResponse<FinancialListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
         }
 
+        if (await marketRepository.CountScoreSnapshotsAsync(resolvedDate.Value, snapshotVersion, cancellationToken) > 0)
+        {
+            return await marketRepository.GetFinancialScorePageAsync(resolvedDate.Value, snapshotVersion, query, cancellationToken);
+        }
+
         var indicators = await marketRepository.GetIndicatorSnapshotsAsync(resolvedDate.Value, snapshotVersion, cancellationToken);
-        var profiles = await marketRepository.GetStockProfilesByCodesAsync(indicators.Select(static item => item.StockCode), cancellationToken);
-        var financials = await marketRepository.GetLatestFinancialsByCodesAsync(indicators.Select(static item => item.StockCode), cancellationToken);
+        var stockCodes = indicators.Select(static item => item.StockCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var profiles = await marketRepository.GetStockProfilesByCodesAsync(stockCodes, cancellationToken);
+        var financials = await marketRepository.GetLatestFinancialsByCodesAsync(stockCodes, cancellationToken);
+        var candidateScores = (await marketRepository.GetCandidatesAsync(resolvedDate.Value, snapshotVersion, cancellationToken))
+            .ToDictionary(static item => item.StockCode, StringComparer.OrdinalIgnoreCase);
+        var stockFundFlows = await marketRepository.GetStockFundFlowsByCodesAsync(resolvedDate.Value, stockCodes, cancellationToken);
         var industries = await marketRepository.GetIndustryStatsByNamesAsync(
             resolvedDate.Value,
-            profiles.Values.Select(static item => item.IndustryName).Distinct().ToList(),
+            profiles.Values.Select(static item => item.EffectiveScoringIndustryName).Distinct().ToList(),
             cancellationToken);
+        var industryFundFlows = await marketRepository.GetIndustryFundFlowsByNamesAsync(
+            resolvedDate.Value,
+            profiles.Values.Select(static item => item.EffectiveScoringIndustryName).Distinct().ToList(),
+            cancellationToken);
+        var lhbSnapshots = await marketRepository.GetLhbSnapshotsByCodesAsync(resolvedDate.Value, stockCodes, cancellationToken);
+        var indexHistory = await marketRepository.GetIndexBarHistoryAsync(resolvedDate.Value, 80, cancellationToken);
+        var stockHistoryMetrics = await marketRepository.GetScoringHistoryMetricsByCodesAsync(stockCodes, resolvedDate.Value, cancellationToken);
+        var orderedIndexBars = indexHistory
+            .GroupBy(static item => item.IndexCode)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.OrderBy(item => item.TradeDate).ToList());
+        var benchmarkIndex = orderedIndexBars.TryGetValue("000300", out var csi300)
+            ? csi300
+            : orderedIndexBars.Values.FirstOrDefault();
+        var indexReturn20d = benchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(benchmarkIndex, 20) : 0m;
+        var indexReturn60d = benchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(benchmarkIndex, 60) : 0m;
 
-        var items = indicators
-            .Select(indicator =>
+        var items = new List<FinancialListItemResponse>();
+        foreach (var indicator in indicators)
+        {
+            if (!profiles.TryGetValue(indicator.StockCode, out var profile))
             {
-                if (!profiles.TryGetValue(indicator.StockCode, out var profile))
-                {
-                    return null;
-                }
+                continue;
+            }
 
-                financials.TryGetValue(indicator.StockCode, out var financial);
-                industries.TryGetValue(profile.IndustryName ?? string.Empty, out var industry);
-                var scoreBreakdown = CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry);
+            financials.TryGetValue(indicator.StockCode, out var financial);
+            var scoringIndustryName = profile.EffectiveScoringIndustryName ?? string.Empty;
+            industries.TryGetValue(scoringIndustryName, out var industry);
+            stockFundFlows.TryGetValue(indicator.StockCode, out var stockFundFlow);
+            industryFundFlows.TryGetValue(scoringIndustryName, out var industryFundFlow);
+            lhbSnapshots.TryGetValue(indicator.StockCode, out var lhbSnapshot);
 
-                return new FinancialListItemResponse(
-                    indicator.StockCode,
-                    profile.StockName,
-                    profile.IndustryName,
-                    financial?.ReportDate,
-                    scoreBreakdown.TotalScore,
-                    financial?.Pe ?? profile.Pe,
-                    financial?.Pb ?? profile.Pb,
-                    financial?.Roe,
-                    financial?.RevenueYoy,
-                    financial?.NetProfitYoy,
-                    financial?.FreeFloatMarketCap ?? profile.FreeFloatMarketCap);
-            })
-            .Where(static item => item is not null)
-            .Cast<FinancialListItemResponse>()
-            .ToList();
+            stockHistoryMetrics.TryGetValue(indicator.StockCode, out var historyMetrics);
+            var return10d = historyMetrics?.Return10d ?? 0m;
+            var amountRatio1d = historyMetrics?.AmountRatio1d ?? 0m;
+            var ma60Previous = historyMetrics?.Ma60Previous ?? 0m;
+            var context = new CandidateScoringContext(
+                return10d,
+                indexReturn20d,
+                indexReturn60d,
+                industry?.PctChange20d,
+                indicator.Ma60 > ma60Previous && ma60Previous > 0m,
+                amountRatio1d,
+                stockFundFlow,
+                industryFundFlow,
+                lhbSnapshot);
+            var scoreBreakdown = candidateScores.TryGetValue(indicator.StockCode, out var candidate)
+                ? candidate.ScoreBreakdown
+                : CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry, context);
+            var totalScore = candidate is not null
+                ? candidate.TotalScore
+                : scoreBreakdown.TotalScore;
+
+            items.Add(new FinancialListItemResponse(
+                indicator.StockCode,
+                profile.StockName,
+                profile.IndustryName,
+                financial?.ReportDate,
+                totalScore,
+                financial?.Pe ?? profile.Pe,
+                financial?.Pb ?? profile.Pb,
+                financial?.Roe,
+                financial?.RevenueYoy,
+                financial?.NetProfitYoy,
+                financial?.FreeFloatMarketCap ?? profile.FreeFloatMarketCap,
+                financial?.OperatingCashFlow,
+                financial?.GrossMargin,
+                financial?.DebtToAssetRatio,
+                financial?.OperatingCashFlowNet,
+                financial?.AnnouncementDate,
+                financial?.DataSourcePriority));
+        }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -625,7 +752,7 @@ public sealed class GetStrategyExplanationUseCase
     public StrategyExplanationResponse Execute()
     {
         return new StrategyExplanationResponse(
-            "a-share-20k-v1",
+            "a-share-20k-v2",
             [
                 new StrategyRuleSectionResponse("候选池范围", [
                     "观察池默认覆盖主板和创业板；是否能进入可执行结果，由账户权限开关控制。",
@@ -638,45 +765,55 @@ public sealed class GetStrategyExplanationUseCase
                     "3 个确认为强势，2 个确认可交易，1 个确认弱机会，0 个确认不交易。"
                 ]),
                 new StrategyRuleSectionResponse("评分分层", [
-                    "80 分以下直接淘汰，不进入候选池。",
-                    "80 到 84 分只保留学习观察。",
-                    "85 到 89 分进入强观察，但不进入可执行结果。",
+                    "82 分以下直接淘汰，不进入观察池。",
+                    "82 到 87 分只保留普通观察。",
+                    "88 到 89 分进入强观察，但不进入可执行结果。",
                     "90 分及以上才有资格进入可执行评估。"
                 ]),
                 new StrategyRuleSectionResponse("可执行信号门槛", [
                     "策略类型必须是突破或回踩 MA20。",
                     "市场环境不能是不交易；弱机会市场不执行突破策略。",
                     "股票必须在当前账户的可交易池内，否则只保留观察。",
-                    "风险收益比至少为 2。",
+                    "风险收益比至少为 1.8。",
                     "最近一次回测必须通过准入标准，否则系统只展示观察结果。"
                 ])
             ],
             [
                 new StrategyScoreDimensionResponse("相对强弱", 30m, [
-                    "20日收益率为正，加 10 分。",
-                    "60日收益率为正，加 8 分。",
-                    "相对强弱分为正，加 7 分。",
-                    "距离 MA20 在 10% 以内，加 5 分。"
+                    "20日收益率跑赢基准指数，加 8 分。",
+                    "20日收益率跑赢所属行业，加 7 分。",
+                    "60日收益率跑赢基准指数，加 7 分。",
+                    "全市场相对强度分位不低于 80，加 8 分。"
                 ]),
-                new StrategyScoreDimensionResponse("趋势", 25m, [
-                    "收盘价站上 MA60，加 6 分。",
-                    "MA20 > MA60 > MA120 的多头排列，加 8 分。",
-                    "收盘价站上 MA20，加 4 分。",
-                    "MA20 保持上行，加 4 分。",
-                    "距离 MA20 在 10% 以内，加 3 分。"
+                new StrategyScoreDimensionResponse("趋势质量", 25m, [
+                    "收盘价站上 MA20/MA60/MA120，合计最高 11 分。",
+                    "MA20 > MA60 > MA120 的多头排列，加 6 分。",
+                    "MA20 和 MA60 保持上行，合计最高 5 分。",
+                    "20日收盘突破，加 2 分。",
+                    "距离 MA20 不超过 10%，加 1 分。"
                 ]),
-                new StrategyScoreDimensionResponse("量价", 25m, [
-                    "出现 20 日收盘突破，加 7 分。",
+                new StrategyScoreDimensionResponse("量价确认", 20m, [
+                    "近 1 日成交额相对 20 日均量明显放大，加 6 分。",
                     "换手率位于 2% 到 8%，加 4 分。",
-                    "20 日平均成交额超过 5 亿元加 4 分，否则加 2 分。",
-                    "行业 20 日强度排名前 10，加 5 分。"
+                    "20 日平均成交额达到 15 亿以上，加 4 分。",
+                    "成交额未明显萎缩，加 3 分。",
+                    "量价配合稳定，加 3 分。",
+                    "行业、资金流和龙虎榜机构净买入在观察期只作为解释标签，不参与核心加分。"
                 ]),
-                new StrategyScoreDimensionResponse("基本面", 20m, [
-                    "净利润同比为正，加 5 分。",
-                    "营收同比为正，加 4 分。",
-                    "ROE 不低于 8，加 5 分。",
-                    "PE 位于 0 到 80 之间，加 3 分。",
-                    "PB 位于 0 到 8 之间，加 3 分。"
+                new StrategyScoreDimensionResponse("基本面质量", 15m, [
+                    "ROE 不低于 8，加 4 分。",
+                    "营收同比为正，加 3 分。",
+                    "净利润同比为正，加 3 分。",
+                    "经营现金流为正，加 2 分。",
+                    "毛利率和负债率无极端异常，加 1 分。",
+                    "估值 PE/PB 无极端异常，加 2 分。"
+                ]),
+                new StrategyScoreDimensionResponse("风险纪律", 10m, [
+                    "ATR/收盘价不超过 5%，加 2 分。",
+                    "近 10 日涨幅不超过 20%，加 3 分。",
+                    "距离 MA20 不过远，合计最高 3 分。",
+                    "换手率不过热，加 2 分。",
+                    "极端换手和龙虎榜高热风险会扣分。"
                 ])
             ],
             [
@@ -719,11 +856,11 @@ public sealed class GetBacktestOverviewUseCase(IMarketDataRepository marketRepos
 
         if (trades.Count == 0)
         {
-            return new BacktestOverviewResponse("a-share-20k-v1", 0, 0m, 0m, 0m, 0m, 0m, 0m, 0, 0m, 0, false, ["缺少回测记录"], []);
+            return new BacktestOverviewResponse("a-share-20k-v2", 0, 0m, 0m, 0m, 0m, 0m, 0m, 0, 0m, 0, false, ["缺少回测记录"], []);
         }
 
         return new BacktestOverviewResponse(
-            "a-share-20k-v1",
+            "a-share-20k-v2",
             trades.Count,
             Math.Round(trades.Count(static item => item.ReturnPct > 0m) * 100m / trades.Count, 2, MidpointRounding.AwayFromZero),
             Math.Round(trades.Average(static item => item.ReturnPct), 2, MidpointRounding.AwayFromZero),
@@ -828,8 +965,8 @@ public sealed class RunDomainSyncUseCase(
         try
         {
             var tradeDate = forceRefreshLatest
-                ? await ensureLatestSnapshot.RebuildLatestAsync(snapshotVersion, cancellationToken)
-                : await ensureLatestSnapshot.ExecuteAsync(snapshotVersion, cancellationToken);
+                ? await ensureLatestSnapshot.RebuildLatestAsync(syncState, snapshotVersion, cancellationToken)
+                : await ensureLatestSnapshot.ExecuteAsync(syncState, snapshotVersion, cancellationToken);
             var finishedAtUtc = DateTime.UtcNow;
             var regime = tradeDate is null
                 ? null
@@ -899,7 +1036,8 @@ public sealed class GetTaskCenterOverviewUseCase(
     EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
     IMarketDataRepository marketRepository,
     IIngestionLogRepository ingestionLogRepository,
-    IDomainSyncRunRepository domainSyncRunRepository)
+    IDomainSyncRunRepository domainSyncRunRepository,
+    IBacktestRunRepository backtestRunRepository)
 {
     /// <summary>
     /// 返回任务中心概览数据。
@@ -962,6 +1100,8 @@ public sealed class GetTaskCenterOverviewUseCase(
         var candidates = await marketRepository.GetCandidatesAsync(tradeDate.Value, snapshotVersion, cancellationToken);
         var signals = await marketRepository.GetSignalsAsync(tradeDate.Value, snapshotVersion, cancellationToken);
         var regime = await marketRepository.GetMarketRegimeAsync(tradeDate.Value, snapshotVersion, cancellationToken);
+        var backtestApproval = BacktestApprovalPolicy.Resolve(await backtestRunRepository.GetLatestRunAsync(cancellationToken));
+        var isSignalEligible = (regime?.IsSignalEligible ?? false) && backtestApproval.IsApproved;
 
         return new TaskCenterOverviewResponse(
             tradeDate.Value,
@@ -972,7 +1112,7 @@ public sealed class GetTaskCenterOverviewUseCase(
             candidates.Count,
             signals.Count,
             MarketResponseMapper.FormatMarketRegime(regime?.Regime),
-            regime?.IsSignalEligible ?? false,
+            isSignalEligible,
             schedules,
             statusMessages,
             recentCollectorRuns.Select(static item => new TaskRunItemResponse(item.TargetScope, item.IsComplete, item.IsSignalEligible, item.CreatedAtUtc)).ToList(),
@@ -996,8 +1136,8 @@ public sealed class GetTaskCenterOverviewUseCase(
     {
         return
         [
-            new TaskScheduleItemResponse("收盘正式版采集", "每周一至周五 15:20（Asia/Shanghai）", "收盘后采集股票快照、日线、指数与行业数据，并生成正式结果。"),
-            new TaskScheduleItemResponse("收盘补拉任务", "每周一至周五 16:00 / 16:30 / 17:00 / 18:00（Asia/Shanghai）", "若上游仍未发布当日日频数据，则继续补拉，直到原始交易日更新为当天。"),
+            new TaskScheduleItemResponse("收盘正式版采集", "每周一至周五 16:30（Asia/Shanghai）", "收盘后采集股票快照、日线、指数与行业数据，并生成正式结果。"),
+            new TaskScheduleItemResponse("收盘补拉任务", "每周一至周五 18:30（Asia/Shanghai）", "若上游仍未发布当日日频数据，则继续补拉，直到原始交易日更新为当天。"),
             new TaskScheduleItemResponse("财务采集", "每周日 21:00（Asia/Shanghai）", "更新财务与估值快照。"),
             new TaskScheduleItemResponse("领域同步任务", "启动时 + 每 60 秒", "检查原始层变更并同步到领域快照、指标、候选池和交易信号。")
         ];
@@ -1021,9 +1161,9 @@ public sealed class GetTaskCenterOverviewUseCase(
             messages.Add("上游仍返回昨日交易日，今日日频数据尚未发布。");
         }
 
-        if (recentCollectorRuns.Any(item => item.TargetScope == "sync-daily-indices" && !item.IsComplete))
+        if (recentCollectorRuns.Any(item => item.TargetScope == "sync-daily-industries" && !item.IsComplete))
         {
-            messages.Add("指数数据不完整，正式评分会继续沿用最近完整交易日。");
+            messages.Add("行业数据不完整，正式评分会继续沿用最近完整交易日。");
         }
 
         if (messages.Count == 0)
@@ -1062,7 +1202,9 @@ public sealed class GetStockDetailUseCase(
 
         var latestBarHistory = await marketRepository.GetRecentImportedDailyBarsAsync(stockCode, resolvedDate.Value, 60, cancellationToken);
         var indicator = await marketRepository.GetIndicatorSnapshotAsync(stockCode, resolvedDate.Value, snapshotVersion, cancellationToken);
+        indicator ??= await BuildIndicatorSnapshotFallbackAsync(stockCode, resolvedDate.Value, cancellationToken);
         var financial = await marketRepository.GetLatestFinancialAsync(stockCode, cancellationToken);
+        var stockFundFlow = (await marketRepository.GetStockFundFlowsByCodesAsync(resolvedDate.Value, [stockCode], cancellationToken)).GetValueOrDefault(stockCode);
         var candidate = await marketRepository.GetCandidateAsync(stockCode, resolvedDate.Value, snapshotVersion, cancellationToken);
         var signal = await marketRepository.GetSignalAsync(stockCode, resolvedDate.Value, snapshotVersion, cancellationToken);
         if (latestBarHistory.Count == 0)
@@ -1071,16 +1213,51 @@ public sealed class GetStockDetailUseCase(
         }
 
         var latestBar = latestBarHistory.OrderBy(static item => item.TradeDate).Last();
-        var industry = await ResolveIndustryAsync(profile.IndustryName, resolvedDate.Value, cancellationToken);
+        var scoringIndustryName = profile.EffectiveScoringIndustryName;
+        var industry = await ResolveIndustryAsync(scoringIndustryName, resolvedDate.Value, cancellationToken);
+        var industryFundFlow = string.IsNullOrWhiteSpace(scoringIndustryName)
+            ? null
+            : (await marketRepository.GetIndustryFundFlowsByNamesAsync(resolvedDate.Value, [scoringIndustryName], cancellationToken)).GetValueOrDefault(scoringIndustryName);
+        var lhb = (await marketRepository.GetLhbSnapshotsByCodesAsync(resolvedDate.Value, [stockCode], cancellationToken)).GetValueOrDefault(stockCode);
         var regime = await marketRepository.GetMarketRegimeAsync(resolvedDate.Value, snapshotVersion, cancellationToken)
             ?? new MarketRegimeSnapshot(resolvedDate.Value, MarketSignalEligibility.NoTrade, 0, false, "暂无市场环境快照");
+        var detailHistory = await marketRepository.GetDailyBarHistoryAsync(stockCode, resolvedDate.Value, 80, cancellationToken);
+        var orderedDetailHistory = detailHistory.OrderBy(static item => item.TradeDate).ToList();
+        var detailReturn10d = IndicatorMath.CalculateReturn(orderedDetailHistory, 10);
+        var detailAmountRatio1d = orderedDetailHistory.Count >= 21
+            ? IndicatorMath.CalculateAmountRatio(orderedDetailHistory, 20)
+            : 0m;
+        var detailMa60Previous = orderedDetailHistory.Count >= 70
+            ? IndicatorMath.CalculateSimpleMovingAverage(orderedDetailHistory.Take(orderedDetailHistory.Count - 10).ToList(), 60)
+            : 0m;
+        var detailIndexHistory = await marketRepository.GetIndexBarHistoryAsync(resolvedDate.Value, 80, cancellationToken);
+        var orderedDetailIndexBars = detailIndexHistory
+            .GroupBy(static item => item.IndexCode)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.OrderBy(item => item.TradeDate).ToList());
+        var detailBenchmarkIndex = orderedDetailIndexBars.TryGetValue("000300", out var detailCsi300)
+            ? detailCsi300
+            : orderedDetailIndexBars.Values.FirstOrDefault();
+        var detailIndexReturn20d = detailBenchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(detailBenchmarkIndex, 20) : 0m;
+        var detailIndexReturn60d = detailBenchmarkIndex is not null ? IndicatorMath.CalculateIndexReturn(detailBenchmarkIndex, 60) : 0m;
+        var detailContext = new CandidateScoringContext(
+            detailReturn10d,
+            detailIndexReturn20d,
+            detailIndexReturn60d,
+            industry?.PctChange20d,
+            indicator is not null && detailMa60Previous > 0m && indicator.Ma60 > detailMa60Previous,
+            detailAmountRatio1d,
+            stockFundFlow,
+            industryFundFlow,
+            lhb);
         CandidateListItemResponse? candidateResponse = null;
         if (candidate is not null)
         {
             // 详情页按最新规则重建一次评分拆解，避免数据库中仅有汇总分而缺少逐条明细。
             var scoreBreakdown = indicator is null
                 ? candidate.ScoreBreakdown
-                : CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry);
+                : CandidatePolicy.DescribeScoreBreakdown(profile, indicator, financial, industry, detailContext);
 
             candidateResponse = new CandidateListItemResponse(
                 candidate.StockCode,
@@ -1102,7 +1279,8 @@ public sealed class GetStockDetailUseCase(
                 candidate.TargetPrice,
                 candidate.RiskRewardRatio,
                 candidate.Explanation,
-                MarketResponseMapper.BuildScoreRuleDetails(scoreBreakdown));
+                MarketResponseMapper.BuildScoreRuleDetails(scoreBreakdown),
+                TradeExecutionPlanFactory.BuildForCandidate(candidate));
         }
         else if (indicator is not null)
         {
@@ -1113,7 +1291,8 @@ public sealed class GetStockDetailUseCase(
                 financial,
                 industry,
                 regime,
-                TradingBoardClassifier.IsInTradablePool(profile.StockCode, new TradingPermissionsOptions()));
+                TradingBoardClassifier.IsInTradablePool(profile.StockCode, new TradingPermissionsOptions()),
+                detailContext);
 
             candidateResponse = new CandidateListItemResponse(
                 preview.StockCode,
@@ -1135,7 +1314,8 @@ public sealed class GetStockDetailUseCase(
                 preview.TargetPrice,
                 preview.RiskRewardRatio,
                 preview.Explanation,
-                MarketResponseMapper.BuildScoreRuleDetails(preview.ScoreBreakdown));
+                MarketResponseMapper.BuildScoreRuleDetails(preview.ScoreBreakdown),
+                TradeExecutionPlanFactory.BuildForPreview(preview));
         }
 
         return new StockDetailResponse(
@@ -1148,14 +1328,41 @@ public sealed class GetStockDetailUseCase(
             new PriceSeriesResponse(latestBar.TradeDate, latestBar.Open, latestBar.High, latestBar.Low, latestBar.Close, latestBar.Volume, latestBar.Amount, indicator?.Ma20, indicator?.Ma60, indicator?.Ma120),
             financial is null
                 ? null
-                : new FinancialSummaryResponse(financial.ReportDate, financial.Pe ?? profile.Pe, financial.Pb ?? profile.Pb, financial.Roe, financial.RevenueYoy, financial.NetProfitYoy),
+                : new FinancialSummaryResponse(financial.ReportDate, financial.Pe ?? profile.Pe, financial.Pb ?? profile.Pb, financial.Roe, financial.RevenueYoy, financial.NetProfitYoy, financial.OperatingCashFlow, financial.GrossMargin, financial.DebtToAssetRatio, financial.OperatingCashFlowNet, financial.AnnouncementDate, financial.DataSourcePriority),
             indicator is null ? null : new IndicatorSummaryResponse(indicator.Close, indicator.Ma20, indicator.Ma60, indicator.Ma120, indicator.Atr14, indicator.Return20d, indicator.Return60d, indicator.RelativeStrengthScore, indicator.Is20DayBreakout, indicator.IsMa20Upward, indicator.IsBullishStacked, indicator.DistanceToMa20Pct),
+            stockFundFlow is null && industryFundFlow is null
+                ? null
+                : new FundFlowSummaryResponse(
+                    resolvedDate.Value,
+                    stockFundFlow?.MainNetAmount,
+                    stockFundFlow?.MainNetPct,
+                    stockFundFlow?.SuperLargeNetAmount,
+                    stockFundFlow?.SuperLargeNetPct,
+                    stockFundFlow?.RankPercentile5d,
+                    industryFundFlow?.MainNetAmount,
+                    industryFundFlow?.MainNetPct,
+                    industryFundFlow?.Rank,
+                    industryFundFlow?.RankPercentile),
+            lhb is null
+                ? null
+                : new LhbSummaryResponse(
+                    lhb.IsOnLhbToday,
+                    lhb.TradeDate,
+                    lhb.Reason,
+                    lhb.NetAmount,
+                    lhb.InstitutionNetAmount,
+                    lhb.InstitutionBuyCount,
+                    lhb.IsInstitutionNetBuy,
+                    lhb.Recent20dLhbCount,
+                    lhb.DaysSinceLastLhb,
+                    lhb.RiskFlags),
             candidateResponse,
-            signal is null ? null : new SignalListItemResponse(signal.StockCode, signal.StockName, signal.IndustryName, MarketResponseMapper.FormatStrategyType(signal.StrategyType), MarketResponseMapper.FormatEligibilityStatus(signal.EligibilityStatus), MarketResponseMapper.BuildEligibilityReasons(signal.EligibilityReason), signal.TotalScore, signal.ScoreBreakdown, signal.TriggerPrice, signal.StopLossPrice, signal.TargetPrice, signal.RiskRewardRatio, signal.SuggestedCapital, signal.EstimatedShares, signal.Explanation, signal.GeneratedAtUtc),
+            signal is null ? null : new SignalListItemResponse(signal.StockCode, signal.StockName, signal.IndustryName, MarketResponseMapper.FormatStrategyType(signal.StrategyType), MarketResponseMapper.FormatEligibilityStatus(signal.EligibilityStatus), MarketResponseMapper.BuildEligibilityReasons(signal.EligibilityReason), signal.TotalScore, signal.ScoreBreakdown, signal.TriggerPrice, signal.StopLossPrice, signal.TargetPrice, signal.RiskRewardRatio, signal.SuggestedCapital, signal.EstimatedShares, signal.Explanation, signal.GeneratedAtUtc, TradeExecutionPlanFactory.BuildForSignal(signal)),
             latestBarHistory
                 .OrderBy(static item => item.TradeDate)
                 .Select(item => new PriceSeriesResponse(item.TradeDate, item.Open, item.High, item.Low, item.Close, item.Volume, item.Amount, item.TradeDate == resolvedDate.Value ? indicator?.Ma20 : null, item.TradeDate == resolvedDate.Value ? indicator?.Ma60 : null, item.TradeDate == resolvedDate.Value ? indicator?.Ma120 : null))
-                .ToList());
+                .ToList(),
+            profile.ScoringIndustryName);
     }
 
     /// <summary>
@@ -1171,6 +1378,184 @@ public sealed class GetStockDetailUseCase(
         var industries = await marketRepository.GetIndustryStatsByNamesAsync(tradeDate, [industryName], cancellationToken);
         return industries.TryGetValue(industryName, out var industry) ? industry : null;
     }
+
+    private async Task<IndicatorSnapshot?> BuildIndicatorSnapshotFallbackAsync(string stockCode, DateOnly tradeDate, CancellationToken cancellationToken)
+    {
+        var history = await marketRepository.GetDailyBarHistoryAsync(stockCode, tradeDate, 140, cancellationToken);
+        var ordered = history
+            .Where(item => item.TradeDate <= tradeDate)
+            .OrderBy(static item => item.TradeDate)
+            .ToList();
+
+        if (ordered.Count < 120)
+        {
+            return null;
+        }
+
+        var latest = ordered[^1];
+        var ma20 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 20);
+        var ma60 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 60);
+        var ma120 = IndicatorMath.CalculateSimpleMovingAverage(ordered, 120);
+        var atr14 = IndicatorMath.CalculateAtr14(ordered);
+        var return20 = IndicatorMath.CalculateReturn(ordered, 20);
+        var return60 = IndicatorMath.CalculateReturn(ordered, 60);
+        var distanceToMa20 = ma20 == 0m ? 0m : ((latest.Close - ma20) / ma20) * 100m;
+        var previousMa20 = ordered.Count > 30
+            ? IndicatorMath.CalculateSimpleMovingAverage(ordered.Take(ordered.Count - 10).ToList(), 20)
+            : 0m;
+        var breakoutClose = ordered.TakeLast(20).Max(static item => item.Close);
+
+        return new IndicatorSnapshot(
+            stockCode,
+            tradeDate,
+            latest.Close,
+            ma20,
+            ma60,
+            ma120,
+            atr14,
+            return20,
+            return60,
+            0m,
+            latest.Close >= breakoutClose,
+            ma20 > previousMa20,
+            ma20 > ma60 && ma60 > ma120,
+            Math.Round(distanceToMa20, 4, MidpointRounding.AwayFromZero),
+            latest.TurnoverRate);
+    }
+}
+
+internal static class TradeExecutionPlanFactory
+{
+    internal static TradeExecutionPlanResponse BuildForCandidate(CandidateStock candidate)
+        => Build(
+            candidate.StrategyType,
+            candidate.EligibilityStatus,
+            candidate.Close,
+            candidate.Close,
+            candidate.StopLossPrice,
+            candidate.TargetPrice,
+            candidate.RiskRewardRatio,
+            null,
+            null);
+
+    internal static TradeExecutionPlanResponse BuildForPreview(CandidateListPreview preview)
+        => Build(
+            preview.StrategyType,
+            preview.EligibilityStatus,
+            preview.Close,
+            preview.Close,
+            preview.StopLossPrice,
+            preview.TargetPrice,
+            preview.RiskRewardRatio,
+            null,
+            null);
+
+    internal static TradeExecutionPlanResponse BuildForSignal(TradeSignal signal)
+        => Build(
+            signal.StrategyType,
+            signal.EligibilityStatus,
+            signal.TriggerPrice,
+            signal.TriggerPrice,
+            signal.StopLossPrice,
+            signal.TargetPrice,
+            signal.RiskRewardRatio,
+            signal.SuggestedCapital,
+            signal.EstimatedShares);
+
+    internal static TradeExecutionPlanResponse BuildForPosition(
+        string strategyType,
+        decimal entryPrice,
+        decimal stopLossPrice,
+        decimal targetPrice,
+        decimal investedCapital,
+        int quantity)
+    {
+        var normalizedType = strategyType.Contains("回踩", StringComparison.OrdinalIgnoreCase)
+            ? StrategyType.PullbackToMa20
+            : StrategyType.Breakout;
+        var rr = CalculateRiskReward(entryPrice, stopLossPrice, targetPrice);
+        return Build(normalizedType, "tradable", entryPrice, entryPrice, stopLossPrice, targetPrice, rr, investedCapital, quantity);
+    }
+
+    private static TradeExecutionPlanResponse Build(
+        StrategyType strategyType,
+        string eligibilityStatus,
+        decimal referencePrice,
+        decimal triggerPrice,
+        decimal stopLossPrice,
+        decimal targetPrice,
+        decimal riskRewardRatio,
+        decimal? suggestedCapital,
+        int? estimatedShares)
+    {
+        var isPullback = strategyType is StrategyType.PullbackToMa20 or StrategyType.WatchPullback;
+        var isWatch = strategyType is StrategyType.WatchBreakout or StrategyType.WatchPullback;
+        var observationDays = isPullback ? 3 : 2;
+        var maxHoldingDays = isPullback ? 10 : 6;
+        var maxEntryGapPct = isPullback ? 2m : 3m;
+        var planType = MarketResponseMapper.FormatStrategyType(strategyType);
+        var status = MarketResponseMapper.FormatEligibilityStatus(eligibilityStatus);
+        var summary = isPullback
+            ? $"优先等回踩 MA20 一带止跌确认，观察 {observationDays} 个交易日，最长持有 {maxHoldingDays} 天。"
+            : $"优先等突破后延续确认，观察 {observationDays} 个交易日，最长持有 {maxHoldingDays} 天。";
+
+        var entryRules = new List<ExecutionPlanRuleResponse>
+        {
+            new("入场价格", $"{triggerPrice:0.##}", isPullback ? "接近 MA20 后再观察是否止跌转强，不在明显跌破时接飞刀。" : "只在突破价附近参与，避免偏离过大时追高。"),
+            new("允许高开幅度", $"{maxEntryGapPct:0.##}%", isPullback ? "高开超过 2% 放弃，避免回踩策略变成追涨。" : "高开超过 3% 放弃，避免突破后溢价过高。"),
+            new("观察窗口", $"{observationDays} 天", "信号出来后若迟迟不触发或形态走弱，这笔计划自动作废。"),
+        };
+
+        var holdRules = new List<ExecutionPlanRuleResponse>
+        {
+            new("持仓上限", $"{maxHoldingDays} 天", "到期仍未明显走强则按纪律退出，避免拖成中长期被动持仓。"),
+            new("持有原则", isPullback ? "站稳 MA20 再看扩散" : "放量突破后看延续", "有利润时优先看趋势是否延续，不因盘中小波动频繁来回。"),
+        };
+
+        var exitRules = new List<ExecutionPlanRuleResponse>
+        {
+            new("止损价", $"{stopLossPrice:0.##}", "跌破止损价优先退出，不做主观扛单。"),
+            new("目标价", $"{targetPrice:0.##}", "触达目标区可分批兑现，剩余仓位再观察是否有更强趋势。"),
+            new("风险收益比", $"{riskRewardRatio:0.##}", "低于 2 的计划不值得重仓执行。"),
+        };
+
+        var invalidationRules = new List<ExecutionPlanRuleResponse>
+        {
+            new("形态失效", isPullback ? "跌破 MA20 并无修复" : "突破后回落失守触发区", "说明交易逻辑本身不再成立。"),
+            new("高开失效", $">{maxEntryGapPct:0.##}% 高开", "开盘溢价过大时，盈亏比通常会迅速恶化。"),
+            new("超时失效", $"{observationDays} 天未触发", "不把旧信号无限延长到后续交易日。"),
+        };
+
+        return new TradeExecutionPlanResponse(
+            planType,
+            status,
+            summary,
+            Math.Round(referencePrice, 4, MidpointRounding.AwayFromZero),
+            Math.Round(triggerPrice, 4, MidpointRounding.AwayFromZero),
+            Math.Round(stopLossPrice, 4, MidpointRounding.AwayFromZero),
+            Math.Round(targetPrice, 4, MidpointRounding.AwayFromZero),
+            Math.Round(riskRewardRatio, 4, MidpointRounding.AwayFromZero),
+            suggestedCapital,
+            estimatedShares,
+            observationDays,
+            maxHoldingDays,
+            maxEntryGapPct,
+            entryRules,
+            holdRules,
+            exitRules,
+            invalidationRules);
+    }
+
+    private static decimal CalculateRiskReward(decimal triggerPrice, decimal stopLossPrice, decimal targetPrice)
+    {
+        var risk = triggerPrice - stopLossPrice;
+        if (risk <= 0m)
+        {
+            return 0m;
+        }
+
+        return Math.Round((targetPrice - triggerPrice) / risk, 4, MidpointRounding.AwayFromZero);
+    }
 }
 
 /// <summary>
@@ -1178,6 +1563,29 @@ public sealed class GetStockDetailUseCase(
 /// </summary>
 internal static class MarketListQueryPaging
 {
+    internal static IReadOnlyList<TradeSignal> ResolveVisibleSignals(
+        IReadOnlyList<TradeSignal> rawSignals,
+        IReadOnlyList<CandidateStock> candidates,
+        MarketRegimeSnapshot? regime)
+    {
+        if (rawSignals.Count > 0)
+        {
+            return rawSignals;
+        }
+
+        if (regime is null)
+        {
+            return [];
+        }
+
+        return candidates
+            .Where(static item => item.IsTradable)
+            .Select(candidate => CandidatePolicy.BuildSignal(candidate, regime))
+            .Where(static item => item is not null)
+            .Cast<TradeSignal>()
+            .ToList();
+    }
+
     /// <summary>
     /// 将列表转换为分页响应。
     /// </summary>

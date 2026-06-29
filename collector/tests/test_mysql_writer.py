@@ -533,6 +533,116 @@ def test_raw_data_writer_deduplicates_raw_stocks_within_same_batch() -> None:
     assert latest_row["batch_id"] == "batch1"
 
 
+def test_raw_stock_upsert_preserves_existing_latest_industry_when_new_value_is_missing() -> None:
+    writer = RawDataWriter(create_in_memory_engine())
+    writer.create_tables()
+
+    fetched_at = datetime(2026, 6, 25, 15, 30, tzinfo=UTC)
+    writer.upsert_rows(
+        "raw_stocks",
+        [
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "market": "SZ",
+                "industry_name": "化学制品",
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch1",
+                "payload_hash": "hash1",
+                "raw_payload": {"industry_name": "化学制品"},
+                "created_at": fetched_at,
+            }
+        ],
+    )
+
+    writer.upsert_rows(
+        "raw_stocks",
+        [
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "market": "SZ",
+                "industry_name": None,
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch2",
+                "payload_hash": "hash2",
+                "raw_payload": {"industry_name": "C 制造业"},
+                "created_at": fetched_at,
+            }
+        ],
+    )
+
+    with writer.engine.connect() as connection:
+        latest_row = connection.execute(
+            select(latest_raw_stocks_table.c.industry_name)
+            .where(latest_raw_stocks_table.c.stock_code == "002317")
+        ).mappings().one()
+
+    assert latest_row["industry_name"] == "化学制品"
+
+
+def test_update_stock_metadata_preserves_existing_latest_industry_when_new_value_is_generic() -> None:
+    writer = RawDataWriter(create_in_memory_engine())
+    writer.create_tables()
+
+    fetched_at = datetime(2026, 6, 25, 15, 30, tzinfo=UTC)
+    writer.upsert_rows(
+        "raw_stocks",
+        [
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "market": "SZ",
+                "industry_name": "化学制品",
+                "list_date": None,
+                "is_st": False,
+                "is_delisting_risk": False,
+                "is_active": True,
+                "source_name": "akshare",
+                "interface_name": "stock_zh_a_spot",
+                "fetched_at": fetched_at,
+                "batch_id": "batch1",
+                "payload_hash": "hash1",
+                "raw_payload": {"industry_name": "化学制品"},
+                "created_at": fetched_at,
+            }
+        ],
+    )
+
+    updated = writer.update_stock_metadata(
+        "batch1",
+        [
+            {
+                "stock_code": "002317",
+                "stock_name": "众生药业",
+                "industry_name": "C 制造业",
+                "list_date": None,
+            }
+        ],
+    )
+
+    assert updated == 1
+    with writer.engine.connect() as connection:
+        latest_row = connection.execute(
+            select(latest_raw_stocks_table.c.industry_name)
+            .where(latest_raw_stocks_table.c.stock_code == "002317")
+        ).mappings().one()
+
+    assert latest_row["industry_name"] == "化学制品"
+
+
 def test_raw_data_writer_reports_trade_date_not_fully_collected_when_one_scope_missing() -> None:
     writer = RawDataWriter(create_in_memory_engine())
     writer.create_tables()

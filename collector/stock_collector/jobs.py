@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import traceback
@@ -27,7 +28,6 @@ SYMBOL_REQUIRED_JOBS = {
     "bootstrap-financials",
     "retry-failed",
     "sync-daily",
-    "sync-financials",
 }
 
 RETRY_COMPLETENESS_SCOPES = [
@@ -68,6 +68,9 @@ def main() -> None:
             "bootstrap-industries",
             "retry-failed",
             "sync-daily",
+            "sync-stock-fund-flows",
+            "sync-industry-fund-flows",
+            "sync-lhb",
             "sync-daily-missing",
             "sync-financials",
             "schedule-sync",
@@ -129,6 +132,40 @@ def main() -> None:
         print(json.dumps([item.__dict__ for item in result], ensure_ascii=False, default=str))
         return
 
+    if args.job == "sync-stock-fund-flows":
+        selected_trade_date = _parse_trade_date_arg(args.trade_date) or datetime.now(UTC).date()
+        print_result(
+            orchestrator.collect_stock_fund_flows(
+                args.symbols,
+                trade_date=selected_trade_date,
+                is_incremental=True,
+                target_scope="sync-daily-stock-fund-flows",
+            )
+        )
+        return
+
+    if args.job == "sync-industry-fund-flows":
+        selected_trade_date = _parse_trade_date_arg(args.trade_date) or datetime.now(UTC).date()
+        print_result(
+            orchestrator.collect_industry_fund_flows(
+                trade_date=selected_trade_date,
+                is_incremental=True,
+                target_scope="sync-daily-industry-fund-flows",
+            )
+        )
+        return
+
+    if args.job == "sync-lhb":
+        selected_trade_date = _parse_trade_date_arg(args.trade_date) or datetime.now(UTC).date()
+        print_result(
+            orchestrator.collect_lhb_summaries(
+                trade_date=selected_trade_date,
+                is_incremental=True,
+                target_scope="sync-daily-lhb",
+            )
+        )
+        return
+
     if args.job == "sync-daily-missing":
         selected_trade_date = _parse_trade_date_arg(args.trade_date) or datetime.now(UTC).date()
         missing_codes = orchestrator._writer.list_missing_daily_bar_stock_codes(trade_date=selected_trade_date)  # noqa: SLF001
@@ -137,7 +174,13 @@ def main() -> None:
         return
 
     if args.job == "sync-financials":
-        print_result(orchestrator.sync_financials(args.symbols, limit_symbols=args.limit_symbols))
+        stock_codes = args.symbols or orchestrator._writer.list_stock_codes()  # noqa: SLF001
+        if not stock_codes:
+            orchestrator.bootstrap_stocks()
+            stock_codes = orchestrator._writer.list_stock_codes()  # noqa: SLF001
+        if not stock_codes:
+            raise SystemExit("No stock codes are available for financial sync.")
+        print_result(orchestrator.sync_financials(stock_codes, limit_symbols=args.limit_symbols))
         return
 
     if args.job == "schedule-sync":
@@ -181,6 +224,9 @@ def orchestrator_health(orchestrator: CollectorOrchestrator) -> dict[str, Any]:
             "bootstrap-industries",
             "retry-failed",
             "sync-daily",
+            "sync-stock-fund-flows",
+            "sync-industry-fund-flows",
+            "sync-lhb",
             "sync-daily-missing",
             "sync-financials",
             "schedule-sync",
@@ -510,7 +556,7 @@ def _append_schedule_marker(
 ) -> None:
     writer.append_log(
         build_ingestion_log(
-            batch_id=f"schedule:{job.name}:{scheduled_at.isoformat()}",
+            batch_id=_build_schedule_batch_id(job=job, scheduled_at=scheduled_at),
             source_name="scheduler",
             interface_name=job.action,
             target_scope=job.target_scope,
@@ -529,6 +575,16 @@ def _append_schedule_marker(
             error_message=_truncate_log_error_message(error_message),
         )
     )
+
+
+def _build_schedule_batch_id(*, job: ScheduledCollectorJob, scheduled_at: datetime) -> str:
+    raw_value = f"schedule:{job.name}:{scheduled_at.isoformat()}"
+    if len(raw_value) <= 64:
+        return raw_value
+
+    digest = hashlib.sha1(raw_value.encode("utf-8")).hexdigest()[:12]
+    compact_stamp = scheduled_at.strftime("%Y%m%dT%H%M%S%z")
+    return f"schedule:{job.name[:28]}:{compact_stamp}:{digest}"[:64]
 
 
 def _truncate_log_error_message(error_message: str | None) -> str | None:

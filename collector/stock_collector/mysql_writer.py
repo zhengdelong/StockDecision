@@ -154,6 +154,11 @@ raw_financial_snapshots_table = Table(
     Column("net_profit_yoy", Numeric(18, 4), nullable=True),
     Column("free_float_market_cap", Numeric(20, 2), nullable=True),
     Column("operating_cash_flow", Numeric(20, 2), nullable=True),
+    Column("gross_margin", Numeric(18, 4), nullable=True),
+    Column("debt_to_asset_ratio", Numeric(18, 4), nullable=True),
+    Column("operating_cash_flow_net", Numeric(20, 2), nullable=True),
+    Column("announcement_date", Date, nullable=True),
+    Column("data_source_priority", String(32), nullable=True),
     Column("source_name", String(32), nullable=False),
     Column("interface_name", String(64), nullable=False),
     Column("fetched_at", DateTime(timezone=True), nullable=False),
@@ -168,6 +173,92 @@ raw_financial_snapshots_table = Table(
     UniqueConstraint("stock_code", "report_date", name="uk_raw_financial_code_report"),
     Index("idx_raw_financial_batch_id", "batch_id"),
     Index("idx_raw_financial_report_date", "report_date"),
+)
+
+raw_stock_fund_flows_table = Table(
+    "raw_stock_fund_flows",
+    RAW_TABLE_METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("stock_code", String(16), nullable=False),
+    Column("trade_date", Date, nullable=False),
+    Column("main_net_amount", Numeric(20, 2), nullable=True),
+    Column("main_net_pct", Numeric(10, 4), nullable=True),
+    Column("super_large_net_amount", Numeric(20, 2), nullable=True),
+    Column("super_large_net_pct", Numeric(10, 4), nullable=True),
+    Column("large_net_amount", Numeric(20, 2), nullable=True),
+    Column("large_net_pct", Numeric(10, 4), nullable=True),
+    Column("medium_net_amount", Numeric(20, 2), nullable=True),
+    Column("medium_net_pct", Numeric(10, 4), nullable=True),
+    Column("small_net_amount", Numeric(20, 2), nullable=True),
+    Column("small_net_pct", Numeric(10, 4), nullable=True),
+    Column("rank_percentile_5d", Numeric(10, 4), nullable=True),
+    Column("source_name", String(32), nullable=False),
+    Column("interface_name", String(64), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("batch_id", String(64), nullable=False),
+    Column("payload_hash", String(64), nullable=True),
+    Column("retry_count", Integer, nullable=False, default=0),
+    Column("missing_field_count", Integer, nullable=False, default=0),
+    Column("ingestion_status", String(16), nullable=False),
+    Column("error_message", String(512), nullable=True),
+    Column("raw_payload", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("stock_code", "trade_date", name="uk_raw_stock_fund_flows_code_date"),
+    Index("idx_raw_stock_fund_flows_trade_date", "trade_date"),
+)
+
+raw_industry_fund_flows_table = Table(
+    "raw_industry_fund_flows",
+    RAW_TABLE_METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("industry_name", String(64), nullable=False),
+    Column("trade_date", Date, nullable=False),
+    Column("main_net_amount", Numeric(20, 2), nullable=True),
+    Column("main_net_pct", Numeric(10, 4), nullable=True),
+    Column("rank", Integer, nullable=True),
+    Column("source_name", String(32), nullable=False),
+    Column("interface_name", String(64), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("batch_id", String(64), nullable=False),
+    Column("payload_hash", String(64), nullable=True),
+    Column("retry_count", Integer, nullable=False, default=0),
+    Column("missing_field_count", Integer, nullable=False, default=0),
+    Column("ingestion_status", String(16), nullable=False),
+    Column("error_message", String(512), nullable=True),
+    Column("raw_payload", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("industry_name", "trade_date", name="uk_raw_industry_fund_flows_name_date"),
+    Index("idx_raw_industry_fund_flows_trade_date", "trade_date"),
+)
+
+raw_lhb_stock_summaries_table = Table(
+    "raw_lhb_stock_summaries",
+    RAW_TABLE_METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("stock_code", String(16), nullable=False),
+    Column("trade_date", Date, nullable=False),
+    Column("reason", String(256), nullable=True),
+    Column("buy_top5_amount", Numeric(20, 2), nullable=True),
+    Column("sell_top5_amount", Numeric(20, 2), nullable=True),
+    Column("net_amount", Numeric(20, 2), nullable=True),
+    Column("institution_buy_amount", Numeric(20, 2), nullable=True),
+    Column("institution_sell_amount", Numeric(20, 2), nullable=True),
+    Column("institution_net_amount", Numeric(20, 2), nullable=True),
+    Column("institution_buy_count", Integer, nullable=True),
+    Column("is_institution_net_buy", Boolean, nullable=False, default=False),
+    Column("source_name", String(32), nullable=False),
+    Column("interface_name", String(64), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), nullable=False),
+    Column("batch_id", String(64), nullable=False),
+    Column("payload_hash", String(64), nullable=True),
+    Column("retry_count", Integer, nullable=False, default=0),
+    Column("missing_field_count", Integer, nullable=False, default=0),
+    Column("ingestion_status", String(16), nullable=False),
+    Column("error_message", String(512), nullable=True),
+    Column("raw_payload", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("stock_code", "trade_date", name="uk_raw_lhb_stock_summaries_code_date"),
+    Index("idx_raw_lhb_stock_summaries_trade_date", "trade_date"),
 )
 
 raw_market_index_bars_table = Table(
@@ -271,6 +362,9 @@ RAW_TABLES: dict[str, Table] = {
     "raw_stocks": raw_stocks_table,
     "raw_daily_bars": raw_daily_bars_table,
     "raw_financial_snapshots": raw_financial_snapshots_table,
+    "raw_stock_fund_flows": raw_stock_fund_flows_table,
+    "raw_industry_fund_flows": raw_industry_fund_flows_table,
+    "raw_lhb_stock_summaries": raw_lhb_stock_summaries_table,
     "raw_market_index_bars": raw_market_index_bars_table,
     "raw_industry_daily_stats": raw_industry_daily_stats_table,
     "data_ingestion_logs": data_ingestion_logs_table,
@@ -302,6 +396,36 @@ class RawDataWriter:
 
     def create_tables(self) -> None:
         RAW_TABLE_METADATA.create_all(self._engine)
+        self._ensure_financial_optional_columns()
+
+    def _ensure_financial_optional_columns(self) -> None:
+        if self._engine.dialect.name != "mysql":
+            return
+
+        optional_columns = {
+            "gross_margin": "ALTER TABLE raw_financial_snapshots ADD COLUMN gross_margin DECIMAL(18,4) NULL AFTER operating_cash_flow",
+            "debt_to_asset_ratio": "ALTER TABLE raw_financial_snapshots ADD COLUMN debt_to_asset_ratio DECIMAL(18,4) NULL AFTER gross_margin",
+            "operating_cash_flow_net": "ALTER TABLE raw_financial_snapshots ADD COLUMN operating_cash_flow_net DECIMAL(20,2) NULL AFTER debt_to_asset_ratio",
+            "announcement_date": "ALTER TABLE raw_financial_snapshots ADD COLUMN announcement_date DATE NULL AFTER operating_cash_flow_net",
+            "data_source_priority": "ALTER TABLE raw_financial_snapshots ADD COLUMN data_source_priority VARCHAR(32) NULL AFTER announcement_date",
+        }
+        with self._engine.begin() as connection:
+            existing_columns = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = DATABASE()
+                          AND table_name = 'raw_financial_snapshots'
+                        """
+                    )
+                )
+            }
+            for column_name, alter_sql in optional_columns.items():
+                if column_name not in existing_columns:
+                    connection.execute(text(alter_sql))
 
     def upsert_rows(self, table_name: str, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -323,6 +447,14 @@ class RawDataWriter:
     @staticmethod
     def _upsert_latest_raw_stocks(connection: Any, rows: list[dict[str, Any]]) -> None:
         for row in rows:
+            existing_row = connection.execute(
+                select(latest_raw_stocks_table.c.industry_name)
+                .where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
+            ).mappings().first()
+            industry_name = RawDataWriter._resolve_industry_name_for_update(
+                row.get("industry_name"),
+                existing_row["industry_name"] if existing_row is not None else None,
+            )
             connection.execute(
                 latest_raw_stocks_table.delete().where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
             )
@@ -331,7 +463,7 @@ class RawDataWriter:
                 [{
                     "stock_code": row["stock_code"],
                     "stock_name": row["stock_name"],
-                    "industry_name": row.get("industry_name"),
+                    "industry_name": industry_name,
                     "list_date": row.get("list_date"),
                     "is_st": row["is_st"],
                     "is_delisting_risk": row["is_delisting_risk"],
@@ -490,13 +622,21 @@ class RawDataWriter:
         updated = 0
         with self._engine.begin() as connection:
             for row in rows:
+                existing_latest_row = connection.execute(
+                    select(latest_raw_stocks_table.c.industry_name)
+                    .where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
+                ).mappings().first()
+                industry_name = self._resolve_industry_name_for_update(
+                    row.get("industry_name"),
+                    existing_latest_row["industry_name"] if existing_latest_row is not None else None,
+                )
                 result = connection.execute(
                     update(raw_stocks_table)
                     .where(raw_stocks_table.c.batch_id == batch_id)
                     .where(raw_stocks_table.c.stock_code == row["stock_code"])
                     .values(
                         stock_name=row.get("stock_name"),
-                        industry_name=row.get("industry_name"),
+                        industry_name=industry_name,
                         list_date=row.get("list_date"),
                     )
                 )
@@ -509,7 +649,7 @@ class RawDataWriter:
                     .where(latest_raw_stocks_table.c.stock_code == row["stock_code"])
                     .values(
                         stock_name=row.get("stock_name"),
-                        industry_name=row.get("industry_name"),
+                        industry_name=industry_name,
                         list_date=row.get("list_date"),
                     )
                 )
@@ -546,6 +686,12 @@ class RawDataWriter:
             ]
         if table_name == "raw_financial_snapshots":
             return [table.c.stock_code == row["stock_code"], table.c.report_date == row["report_date"]]
+        if table_name == "raw_stock_fund_flows":
+            return [table.c.stock_code == row["stock_code"], table.c.trade_date == row["trade_date"]]
+        if table_name == "raw_industry_fund_flows":
+            return [table.c.industry_name == row["industry_name"], table.c.trade_date == row["trade_date"]]
+        if table_name == "raw_lhb_stock_summaries":
+            return [table.c.stock_code == row["stock_code"], table.c.trade_date == row["trade_date"]]
         if table_name == "raw_market_index_bars":
             return [table.c.index_code == row["index_code"], table.c.trade_date == row["trade_date"]]
         if table_name == "raw_industry_daily_stats":
@@ -580,6 +726,12 @@ class RawDataWriter:
             return (row["stock_code"], row["trade_date"], row["adjust_type"])
         if table_name == "raw_financial_snapshots":
             return (row["stock_code"], row["report_date"])
+        if table_name == "raw_stock_fund_flows":
+            return (row["stock_code"], row["trade_date"])
+        if table_name == "raw_industry_fund_flows":
+            return (row["industry_name"], row["trade_date"])
+        if table_name == "raw_lhb_stock_summaries":
+            return (row["stock_code"], row["trade_date"])
         if table_name == "raw_market_index_bars":
             return (row["index_code"], row["trade_date"])
         if table_name == "raw_industry_daily_stats":
@@ -627,3 +779,20 @@ class RawDataWriter:
         if isinstance(value, tuple):
             return [RawDataWriter._to_json_compatible(item) for item in value]
         return value
+
+    @staticmethod
+    def _resolve_industry_name_for_update(new_value: Any, existing_value: Any) -> str | None:
+        new_industry_name = str(new_value).strip() if new_value not in (None, "") else None
+        existing_industry_name = str(existing_value).strip() if existing_value not in (None, "") else None
+        if new_industry_name and not RawDataWriter._is_generic_industry_name(new_industry_name):
+            return new_industry_name
+        if existing_industry_name and not RawDataWriter._is_generic_industry_name(existing_industry_name):
+            return existing_industry_name
+        return new_industry_name
+
+    @staticmethod
+    def _is_generic_industry_name(industry_name: str) -> bool:
+        generic_prefixes = tuple(f"{prefix} " for prefix in "ABCDEFGHIJKLMNOPQRS")
+        if industry_name.startswith(generic_prefixes):
+            return True
+        return industry_name in {"制造业", "金融业", "房地产业", "建筑业", "农林牧渔业", "采矿业"}

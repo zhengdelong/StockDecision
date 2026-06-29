@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from time import sleep as default_sleep
 from typing import Any
 from uuid import uuid4
@@ -16,9 +17,13 @@ from stock_collector.normalizers import build_checkpoint
 from stock_collector.normalizers import build_ingestion_log
 from stock_collector.normalizers import normalize_daily_bar
 from stock_collector.normalizers import normalize_financial_snapshot
+from stock_collector.normalizers import normalize_industry_fund_flow
 from stock_collector.normalizers import normalize_index_bar
 from stock_collector.normalizers import normalize_industry_stat
+from stock_collector.normalizers import normalize_lhb_stock_summary
+from stock_collector.normalizers import normalize_stock_code
 from stock_collector.normalizers import normalize_stock_snapshot
+from stock_collector.normalizers import normalize_stock_fund_flow
 from stock_collector.policies import CircuitBreakerDecision
 from stock_collector.policies import DataCompletenessInput
 from stock_collector.policies import DataCompletenessPolicy
@@ -29,6 +34,11 @@ DAILY_BAR_INTERFACE = "stock_zh_a_hist"
 INDEX_BAR_INTERFACE = "stock_zh_index_daily"
 INDUSTRY_INTERFACE = "stock_board_industry_index_ths"
 FINANCIAL_INTERFACE = "stock_financial_abstract_ths_fallback_sina"
+FINANCIAL_REPORT_INTERFACE = "stock_yjbb_em_full_market"
+STOCK_FUND_FLOW_INTERFACE = "stock_individual_fund_flow"
+INDUSTRY_FUND_FLOW_INTERFACE = "stock_sector_fund_flow_rank"
+LHB_SUMMARY_INTERFACE = "stock_lhb_detail_em"
+LHB_INSTITUTION_INTERFACE = "stock_lhb_jgmmtj_em"
 
 
 @dataclass(frozen=True)
@@ -136,6 +146,22 @@ class CollectorOrchestrator:
             is_incremental=True,
             target_scope="sync-daily-industries",
         )
+        stock_fund_flow_result = self.collect_stock_fund_flows(
+            stock_codes,
+            trade_date=selected_date,
+            is_incremental=True,
+            target_scope="sync-daily-stock-fund-flows",
+        )
+        industry_fund_flow_result = self.collect_industry_fund_flows(
+            trade_date=selected_date,
+            is_incremental=True,
+            target_scope="sync-daily-industry-fund-flows",
+        )
+        lhb_result = self.collect_lhb_summaries(
+            trade_date=selected_date,
+            is_incremental=True,
+            target_scope="sync-daily-lhb",
+        )
         missing_market_indices = [] if index_result.rows_written >= len(DEFAULT_INDEX_DEFINITIONS) else [
             definition.code for definition in DEFAULT_INDEX_DEFINITIONS
         ]
@@ -150,7 +176,7 @@ class CollectorOrchestrator:
             missing_market_indices=missing_market_indices,
             industry_missing_rate=industry_missing_rate,
         )
-        return [stock_result, daily_result, index_result, industry_result]
+        return [stock_result, daily_result, index_result, industry_result, stock_fund_flow_result, industry_fund_flow_result, lhb_result]
 
     def sync_financials(self, stock_codes: list[str], *, limit_symbols: int | None = None) -> CollectionRunResult:
         return self._collect_financials(
@@ -340,6 +366,333 @@ class CollectorOrchestrator:
             completeness_reasons=[] if written > 0 else ["industry_missing_rate"],
         )
 
+    def collect_stock_fund_flows(
+        self,
+        stock_codes: list[str],
+        *,
+        trade_date: date,
+        is_incremental: bool,
+        target_scope: str,
+    ) -> CollectionRunResult:
+        started_at = self._now()
+        batch_id = self._new_batch_id("raw_stock_fund_flows")
+        rows: list[dict[str, Any]] = []
+        failures = 0
+        today_payload, today_retry_count, today_error = self._fetch_with_retry(
+            lambda: self._client.fetch_stock_fund_flow_rank_resilient(indicator="\u4eca\u65e5"),
+            interface_name=STOCK_FUND_FLOW_INTERFACE,
+            mode="incremental" if is_incremental else "bootstrap",
+        )
+        five_day_payload, five_day_retry_count, five_day_error = self._fetch_with_retry(
+            lambda: self._client.fetch_stock_fund_flow_rank_resilient(indicator="5\u65e5"),
+            interface_name=STOCK_FUND_FLOW_INTERFACE,
+            mode="incremental" if is_incremental else "bootstrap",
+        )
+
+        last_error_message = today_error or five_day_error
+        if today_payload is None:
+            failures += 1
+            today_payload = []
+        if five_day_payload is None:
+            failures += 1
+            five_day_payload = []
+
+        today_audit = AuditContext.create(
+            source_name="akshare",
+            interface_name=STOCK_FUND_FLOW_INTERFACE,
+            symbol="all",
+            batch_id=batch_id,
+            is_incremental=is_incremental,
+            retry_count=today_retry_count,
+            trade_date=trade_date,
+            error_message=today_error,
+        )
+        five_day_audit = AuditContext.create(
+            source_name="akshare",
+            interface_name=STOCK_FUND_FLOW_INTERFACE,
+            symbol="all-5d",
+            batch_id=batch_id,
+            is_incremental=is_incremental,
+            retry_count=five_day_retry_count,
+            trade_date=trade_date,
+            error_message=five_day_error,
+        )
+
+        tracked_codes = set(stock_codes)
+        today_rows_by_code: dict[str, dict[str, Any]] = {}
+        for item in today_payload:
+            stock_code = str(item.get("\u4ee3\u7801") or item.get("\u80a1\u7968\u4ee3\u7801") or item.get("stock_code") or "").strip().zfill(6)
+            if not stock_code or stock_code not in tracked_codes:
+                continue
+            main_net_amount = self._parse_fund_flow_amount(item.get("\u4eca\u65e5\u4e3b\u529b\u51c0\u6d41\u5165-\u51c0\u989d") or item.get("\u51c0\u989d"))
+            main_net_pct = self._parse_fund_flow_pct(item.get("\u4eca\u65e5\u4e3b\u529b\u51c0\u6d41\u5165-\u51c0\u5360\u6bd4"))
+            if main_net_pct is None:
+                amount_value = self._parse_fund_flow_amount(item.get("\u6210\u4ea4\u989d"))
+                if main_net_amount is not None and amount_value not in (None, Decimal("0")):
+                    main_net_pct = (main_net_amount / amount_value) * Decimal("100")
+            normalized = normalize_stock_fund_flow(
+                {
+                    "trade_date": trade_date,
+                    "main_net_amount": main_net_amount,
+                    "main_net_pct": main_net_pct,
+                    "super_large_net_amount": item.get("\u4eca\u65e5\u8d85\u5927\u5355\u51c0\u6d41\u5165-\u51c0\u989d"),
+                    "super_large_net_pct": item.get("\u4eca\u65e5\u8d85\u5927\u5355\u51c0\u6d41\u5165-\u51c0\u5360\u6bd4"),
+                    "large_net_amount": item.get("\u4eca\u65e5\u5927\u5355\u51c0\u6d41\u5165-\u51c0\u989d"),
+                    "large_net_pct": item.get("\u4eca\u65e5\u5927\u5355\u51c0\u6d41\u5165-\u51c0\u5360\u6bd4"),
+                    "medium_net_amount": item.get("\u4eca\u65e5\u4e2d\u5355\u51c0\u6d41\u5165-\u51c0\u989d"),
+                    "medium_net_pct": item.get("\u4eca\u65e5\u4e2d\u5355\u51c0\u6d41\u5165-\u51c0\u5360\u6bd4"),
+                    "small_net_amount": item.get("\u4eca\u65e5\u5c0f\u5355\u51c0\u6d41\u5165-\u51c0\u989d"),
+                    "small_net_pct": item.get("\u4eca\u65e5\u5c0f\u5355\u51c0\u6d41\u5165-\u51c0\u5360\u6bd4"),
+                },
+                today_audit,
+                stock_code=stock_code,
+            )
+            today_rows_by_code[stock_code] = normalized
+
+        five_day_percentile_by_code: dict[str, Any] = {}
+        five_day_total = len(five_day_payload)
+        for item in five_day_payload:
+            stock_code = str(item.get("\u4ee3\u7801") or item.get("\u80a1\u7968\u4ee3\u7801") or item.get("stock_code") or "").strip().zfill(6)
+            if not stock_code or stock_code not in tracked_codes:
+                continue
+            rank = item.get("\u5e8f\u53f7") or item.get("rank")
+            if rank in (None, "", "-", "--"):
+                continue
+            rank_value = int(rank)
+            percentile = 100 if five_day_total <= 1 else round((five_day_total - rank_value) * 100 / (five_day_total - 1), 4)
+            five_day_percentile_by_code[stock_code] = percentile
+
+        for stock_code, normalized in today_rows_by_code.items():
+            if stock_code in five_day_percentile_by_code:
+                normalized["rank_percentile_5d"] = five_day_percentile_by_code[stock_code]
+            else:
+                normalized["rank_percentile_5d"] = normalize_stock_fund_flow(
+                    {"rank_percentile_5d": None, "trade_date": trade_date},
+                    five_day_audit,
+                    stock_code=stock_code,
+                ).get("rank_percentile_5d")
+            rows.append(normalized)
+
+        written = self._writer.upsert_rows("raw_stock_fund_flows", rows)
+        self._writer.append_log(
+            build_ingestion_log(
+                batch_id=batch_id,
+                source_name="akshare",
+                interface_name=STOCK_FUND_FLOW_INTERFACE,
+                target_scope=target_scope,
+                is_incremental=is_incremental,
+                started_at=started_at,
+                finished_at=self._now(),
+                success_count=written,
+                failure_count=failures,
+                missing_field_count=sum(row.get("missing_field_count", 0) for row in rows),
+                consecutive_failure_count=0,
+                window_failure_rate=failures / max(len(stock_codes), 1),
+                is_complete=written > 0,
+                is_signal_eligible=True,
+                circuit_breaker_opened=False,
+                trade_date=trade_date,
+                error_message=last_error_message if written == 0 else None,
+            )
+        )
+        return CollectionRunResult("raw_stock_fund_flows", written, "success" if written > 0 else "partial", written > 0, True, [])
+
+    def collect_industry_fund_flows(
+        self,
+        *,
+        trade_date: date,
+        is_incremental: bool,
+        target_scope: str,
+    ) -> CollectionRunResult:
+        started_at = self._now()
+        batch_id = self._new_batch_id("raw_industry_fund_flows")
+        payload, retry_count, _ = self._fetch_with_retry(
+            self._client.fetch_industry_fund_flow,
+            interface_name=INDUSTRY_FUND_FLOW_INTERFACE,
+            mode="incremental" if is_incremental else "bootstrap",
+        )
+        payload = payload or []
+        audit = AuditContext.create(
+            source_name="akshare",
+            interface_name=INDUSTRY_FUND_FLOW_INTERFACE,
+            symbol="all",
+            batch_id=batch_id,
+            is_incremental=is_incremental,
+            retry_count=retry_count,
+            trade_date=trade_date,
+        )
+        rows = [normalize_industry_fund_flow(item, audit) for item in payload if normalize_industry_fund_flow(item, audit).get("trade_date") == trade_date]
+        written = self._writer.upsert_rows("raw_industry_fund_flows", rows)
+        self._writer.append_log(
+            build_ingestion_log(
+                batch_id=batch_id,
+                source_name="akshare",
+                interface_name=INDUSTRY_FUND_FLOW_INTERFACE,
+                target_scope=target_scope,
+                is_incremental=is_incremental,
+                started_at=started_at,
+                finished_at=self._now(),
+                success_count=written,
+                failure_count=0 if rows else 1,
+                missing_field_count=sum(row.get("missing_field_count", 0) for row in rows),
+                consecutive_failure_count=0,
+                window_failure_rate=0.0 if rows else 1.0,
+                is_complete=written > 0,
+                is_signal_eligible=True,
+                circuit_breaker_opened=False,
+                trade_date=trade_date,
+            )
+        )
+        return CollectionRunResult("raw_industry_fund_flows", written, "success" if written > 0 else "partial", written > 0, True, [])
+
+    def collect_lhb_summaries(
+        self,
+        *,
+        trade_date: date,
+        is_incremental: bool,
+        target_scope: str,
+    ) -> CollectionRunResult:
+        started_at = self._now()
+        batch_id = self._new_batch_id("raw_lhb_stock_summaries")
+        payload, retry_count, detail_error = self._fetch_with_retry(
+            lambda: self._client.fetch_lhb_stock_summary(trade_date.strftime("%Y%m%d")),
+            interface_name=LHB_SUMMARY_INTERFACE,
+            mode="incremental" if is_incremental else "bootstrap",
+        )
+        institution_payload, institution_retry_count, institution_error = self._fetch_with_retry(
+            lambda: self._client.fetch_lhb_institution_summary(trade_date.strftime("%Y%m%d")),
+            interface_name=LHB_INSTITUTION_INTERFACE,
+            mode="incremental" if is_incremental else "bootstrap",
+        )
+        payload = payload or []
+        institution_payload = institution_payload or []
+        rows_by_code: dict[str, dict[str, Any]] = {}
+        for item in payload:
+            stock_code = str(item.get("股票代码") or item.get("代码") or item.get("stock_code") or "").strip()
+            stock_code = self._extract_lhb_stock_code(item)
+            if not stock_code:
+                continue
+            audit = AuditContext.create(
+                source_name="akshare",
+                interface_name=f"{LHB_SUMMARY_INTERFACE}+{LHB_INSTITUTION_INTERFACE}",
+                symbol=stock_code,
+                batch_id=batch_id,
+                is_incremental=is_incremental,
+                retry_count=retry_count,
+                trade_date=trade_date,
+            )
+            normalized = normalize_lhb_stock_summary(item, audit, stock_code=stock_code)
+            if normalized.get("trade_date") == trade_date:
+                self._merge_lhb_detail_row(rows_by_code, normalized)
+
+        for item in institution_payload:
+            stock_code = self._extract_lhb_stock_code(item)
+            if not stock_code:
+                continue
+            audit = AuditContext.create(
+                source_name="akshare",
+                interface_name=LHB_INSTITUTION_INTERFACE,
+                symbol=stock_code,
+                batch_id=batch_id,
+                is_incremental=is_incremental,
+                retry_count=institution_retry_count,
+                trade_date=trade_date,
+            )
+            normalized = normalize_lhb_stock_summary(item, audit, stock_code=stock_code)
+            if normalized.get("trade_date") == trade_date:
+                self._merge_lhb_institution_row(rows_by_code, normalized)
+
+        rows = list(rows_by_code.values())
+        failures = int(detail_error is not None) + int(institution_error is not None)
+        last_error_message = detail_error or institution_error
+
+        written = self._writer.upsert_rows("raw_lhb_stock_summaries", rows)
+        self._writer.append_log(
+            build_ingestion_log(
+                batch_id=batch_id,
+                source_name="akshare",
+                interface_name=f"{LHB_SUMMARY_INTERFACE}+{LHB_INSTITUTION_INTERFACE}",
+                target_scope=target_scope,
+                is_incremental=is_incremental,
+                started_at=started_at,
+                finished_at=self._now(),
+                success_count=written,
+                failure_count=failures,
+                missing_field_count=sum(row.get("missing_field_count", 0) for row in rows),
+                consecutive_failure_count=0,
+                window_failure_rate=failures / 2,
+                is_complete=True,
+                is_signal_eligible=True,
+                circuit_breaker_opened=False,
+                trade_date=trade_date,
+                error_message=last_error_message if written == 0 else None,
+            )
+        )
+        return CollectionRunResult("raw_lhb_stock_summaries", written, "success", True, True, [])
+
+    @staticmethod
+    def _extract_lhb_stock_code(item: dict[str, Any]) -> str:
+        stock_code = str(item.get("股票代码") or item.get("代码") or item.get("stock_code") or "").strip()
+        return stock_code.zfill(6) if stock_code.isdigit() and len(stock_code) < 6 else stock_code
+
+    @classmethod
+    def _merge_lhb_detail_row(cls, rows_by_code: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+        stock_code = str(row["stock_code"])
+        existing = rows_by_code.get(stock_code)
+        if existing is None:
+            rows_by_code[stock_code] = dict(row)
+            return
+
+        existing["reason"] = cls._combine_lhb_reasons(existing.get("reason"), row.get("reason"))
+        existing_net = cls._abs_decimal(existing.get("net_amount"))
+        incoming_net = cls._abs_decimal(row.get("net_amount"))
+        if incoming_net > existing_net:
+            for key in ("buy_top5_amount", "sell_top5_amount", "net_amount", "raw_payload"):
+                existing[key] = row.get(key)
+
+    @classmethod
+    def _merge_lhb_institution_row(cls, rows_by_code: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+        stock_code = str(row["stock_code"])
+        existing = rows_by_code.get(stock_code)
+        if existing is None:
+            existing = dict(row)
+            rows_by_code[stock_code] = existing
+
+        existing["reason"] = cls._combine_lhb_reasons(existing.get("reason"), row.get("reason"))
+        for key in ("institution_buy_amount", "institution_sell_amount", "institution_net_amount"):
+            existing[key] = cls._sum_optional_decimal(existing.get(key), row.get(key))
+        existing["institution_buy_count"] = max(
+            int(existing.get("institution_buy_count") or 0),
+            int(row.get("institution_buy_count") or 0),
+        ) or None
+        existing["is_institution_net_buy"] = (existing.get("institution_net_amount") or Decimal("0")) > 0
+
+    @staticmethod
+    def _combine_lhb_reasons(first: Any, second: Any) -> str | None:
+        parts: list[str] = []
+        for value in (first, second):
+            for text in str(value or "").split("；"):
+                text = text.strip()
+                if text and text not in parts:
+                    parts.append(text)
+        return "；".join(parts) if parts else None
+
+    @staticmethod
+    def _abs_decimal(value: Any) -> Decimal:
+        if value in (None, ""):
+            return Decimal("0")
+        return abs(value if isinstance(value, Decimal) else Decimal(str(value)))
+
+    @staticmethod
+    def _sum_optional_decimal(first: Any, second: Any) -> Decimal | None:
+        first_value = first if isinstance(first, Decimal) else Decimal(str(first)) if first not in (None, "") else None
+        second_value = second if isinstance(second, Decimal) else Decimal(str(second)) if second not in (None, "") else None
+        if first_value is None:
+            return second_value
+        if second_value is None:
+            return first_value
+        return first_value + second_value
+
     def _collect_financials(
         self,
         stock_codes: list[str],
@@ -348,6 +701,15 @@ class CollectorOrchestrator:
         target_scope: str,
         limit_symbols: int | None = None,
     ) -> CollectionRunResult:
+        report_result = self._collect_financial_reports(
+            stock_codes,
+            mode=mode,
+            target_scope=target_scope,
+            limit_symbols=limit_symbols,
+        )
+        if report_result is not None:
+            return report_result
+
         started_at = self._now()
         batch_id = self._new_batch_id("raw_financial_snapshots")
         policy = InterfaceThrottlePolicy.for_interface(FINANCIAL_INTERFACE, mode=mode)
@@ -447,6 +809,100 @@ class CollectorOrchestrator:
             is_complete=written > 0 and failures == 0 and empty_payload_symbols == 0,
             is_signal_eligible=written > 0 and failures == 0 and empty_payload_symbols == 0,
             completeness_reasons=[] if written > 0 and failures == 0 and empty_payload_symbols == 0 else ["financial_partial"],
+        )
+
+    def _collect_financial_reports(
+        self,
+        stock_codes: list[str],
+        *,
+        mode: str,
+        target_scope: str,
+        limit_symbols: int | None = None,
+    ) -> CollectionRunResult | None:
+        started_at = self._now()
+        batch_id = self._new_batch_id("raw_financial_snapshots")
+        periods = self._recent_financial_report_periods(self._now().date(), count=4)
+        tracked_codes = {normalize_stock_code(code) for code in (stock_codes[:limit_symbols] if limit_symbols else stock_codes)}
+        rows: list[dict[str, Any]] = []
+        failures = 0
+        last_error_message: str | None = None
+        latest_report_date: date | None = None
+
+        for report_date in periods:
+            payload, retry_count, error_message = self._fetch_with_retry(
+                lambda value=report_date.strftime("%Y%m%d"): self._client.fetch_financial_report_snapshots(value),
+                interface_name=FINANCIAL_REPORT_INTERFACE,
+                mode=mode,
+            )
+            if payload is None:
+                failures += 1
+                last_error_message = error_message
+                continue
+            if not payload:
+                continue
+
+            latest_report_date = max(latest_report_date or report_date, report_date)
+            audit = AuditContext.create(
+                source_name="akshare",
+                interface_name=FINANCIAL_REPORT_INTERFACE,
+                symbol="all",
+                batch_id=batch_id,
+                is_incremental=mode == "incremental",
+                retry_count=retry_count,
+                report_date=report_date,
+                error_message=error_message,
+            )
+            for item in payload:
+                stock_code = normalize_stock_code(item.get("stock_code") or item.get("股票代码") or item.get("代码"))
+                if tracked_codes and stock_code not in tracked_codes:
+                    continue
+                rows.append(normalize_financial_snapshot(item, audit, stock_code=stock_code))
+
+        if not rows:
+            return None
+
+        written = self._writer.upsert_rows("raw_financial_snapshots", rows)
+        for stock_code in sorted({row["stock_code"] for row in rows}):
+            self._writer.upsert_checkpoint(
+                build_checkpoint(
+                    job_type=target_scope,
+                    batch_id=batch_id,
+                    stock_code=stock_code,
+                    status="success",
+                    retry_count=0,
+                    last_success_date=self._now().date(),
+                )
+            )
+
+        is_complete = written > 0 and failures == 0
+        self._writer.append_log(
+            build_ingestion_log(
+                batch_id=batch_id,
+                source_name="akshare",
+                interface_name=FINANCIAL_REPORT_INTERFACE,
+                target_scope=target_scope,
+                is_incremental=mode == "incremental",
+                started_at=started_at,
+                finished_at=self._now(),
+                success_count=written,
+                failure_count=failures,
+                missing_field_count=sum(row.get("missing_field_count", 0) for row in rows),
+                consecutive_failure_count=failures,
+                window_failure_rate=failures / max(len(periods), 1),
+                is_complete=is_complete,
+                is_signal_eligible=written > 0,
+                circuit_breaker_opened=False,
+                report_date=latest_report_date,
+                error_message=last_error_message if failures > 0 else None,
+            )
+        )
+        return CollectionRunResult(
+            dataset="raw_financial_snapshots",
+            rows_written=written,
+            log_status="success" if is_complete else "partial",
+            is_complete=is_complete,
+            is_signal_eligible=written > 0,
+            completeness_reasons=[] if is_complete else ["financial_report_partial"],
         )
 
     def _collect_daily_bars(
@@ -650,6 +1106,38 @@ class CollectorOrchestrator:
         return failures / len(results)
 
     @staticmethod
+    def _parse_fund_flow_amount(raw_value: Any) -> Decimal | None:
+        if raw_value in (None, "", "-", "--"):
+            return None
+        if isinstance(raw_value, Decimal):
+            return raw_value
+        if isinstance(raw_value, (int, float)):
+            return Decimal(str(raw_value))
+
+        text = str(raw_value).strip().replace(",", "")
+        multiplier = Decimal("1")
+        if text.endswith("亿"):
+            multiplier = Decimal("100000000")
+            text = text[:-1]
+        elif text.endswith("万"):
+            multiplier = Decimal("10000")
+            text = text[:-1]
+
+        return Decimal(text) * multiplier if text else None
+
+    @staticmethod
+    def _parse_fund_flow_pct(raw_value: Any) -> Decimal | None:
+        if raw_value in (None, "", "-", "--"):
+            return None
+        if isinstance(raw_value, Decimal):
+            return raw_value
+        if isinstance(raw_value, (int, float)):
+            return Decimal(str(raw_value))
+
+        text = str(raw_value).strip().replace("%", "")
+        return Decimal(text) if text else None
+
+    @staticmethod
     def _is_anti_bot_error(error_message: str | None) -> bool:
         if not error_message:
             return False
@@ -676,6 +1164,21 @@ class CollectorOrchestrator:
 
     def _new_batch_id(self, dataset: str) -> str:
         return f"{dataset}-{self._now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
+
+    @staticmethod
+    def _recent_financial_report_periods(today: date, *, count: int) -> list[date]:
+        quarter_ends = ((3, 31), (6, 30), (9, 30), (12, 31))
+        periods: list[date] = []
+        year = today.year
+        while len(periods) < count:
+            for month, day in reversed(quarter_ends):
+                candidate = date(year, month, day)
+                if candidate <= today:
+                    periods.append(candidate)
+                    if len(periods) >= count:
+                        break
+            year -= 1
+        return periods
 
     @staticmethod
     def _filter_rows_for_window(rows: list[dict[str, Any]], *, window: CollectionWindow) -> list[dict[str, Any]]:

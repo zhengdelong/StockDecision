@@ -40,7 +40,7 @@ function resolveScoreLabel(item: CandidateItem): string {
     return '高优先级'
   }
 
-  if (item.totalScore >= 85) {
+  if (item.totalScore >= 88) {
     return '强观察'
   }
 
@@ -74,6 +74,16 @@ function resolvePlanPercentages(item: CandidateItem): { riskPct: number | null; 
     riskPct: ((item.close - item.stopLossPrice) / item.close) * 100,
     rewardPct: ((item.targetPrice - item.close) / item.close) * 100,
   }
+}
+
+function resolveHeadlineExplanation(explanation: string | null | undefined): string {
+  if (!explanation) {
+    return '暂无结论摘要'
+  }
+
+  const normalized = explanation.replace(/\s+/g, ' ').trim()
+  const firstSentence = normalized.split('。').find((item) => item.trim().length > 0)
+  return firstSentence ? `${firstSentence}。` : normalized
 }
 </script>
 
@@ -197,6 +207,7 @@ function resolvePlanPercentages(item: CandidateItem): { riskPct: number | null; 
                   {{ item.eligibilityStatus }}
                 </span>
                 <small>{{ item.eligibilityReasons[0] ?? (item.isTradable ? '满足当前执行条件' : '先放入观察名单') }}</small>
+                <small class="cell-summary">{{ resolveHeadlineExplanation(item.explanation) }}</small>
               </div>
             </td>
           </tr>

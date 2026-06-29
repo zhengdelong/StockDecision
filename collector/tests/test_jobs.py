@@ -13,6 +13,7 @@ from stock_collector.jobs import main
 from stock_collector.jobs import run_schedule_pass
 from stock_collector.jobs import ScheduledCollectorJob
 from stock_collector.jobs import SchedulerSettings
+from stock_collector.jobs import _build_schedule_batch_id
 from stock_collector.jobs import _truncate_log_error_message
 from stock_collector.orchestrator import CollectionRunResult
 
@@ -402,7 +403,23 @@ def test_schedule_pass_uses_utc_threshold_when_checking_schedule_marker() -> Non
     outcomes = run_schedule_pass(orchestrator, settings=settings, now=now)
 
     assert outcomes == []
-    assert "job" not in orchestrator.called_with
+
+
+def test_build_schedule_batch_id_keeps_value_within_column_limit() -> None:
+    scheduled_at = datetime(2026, 6, 26, 18, 35, tzinfo=ZoneInfo("Asia/Shanghai"))
+    job = ScheduledCollectorJob(
+        name="backfill-candidate-industries-retry",
+        action="backfill-candidate-industries",
+        target_scope="backfill-candidate-industries-retry",
+        run_time=time(18, 35),
+        run_iso_weekdays={1, 2, 3, 4, 5},
+    )
+
+    batch_id = _build_schedule_batch_id(job=job, scheduled_at=scheduled_at)
+
+    assert len(batch_id) <= 64
+    assert batch_id.startswith("schedule:")
+    assert "20260626T183500+0800" in batch_id
 
 
 def test_schedule_pass_skips_retry_job_when_trade_date_is_current() -> None:

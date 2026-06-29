@@ -34,6 +34,7 @@ export interface ScoreBreakdown {
   trendScore: number
   volumePriceScore: number
   fundamentalScore: number
+  riskDisciplineScore: number
   totalScore: number
 }
 
@@ -45,6 +46,32 @@ export interface ScoreRuleDetail {
   maxScore: number
   hit: boolean
   evidence: string
+}
+
+export interface ExecutionPlanRule {
+  label: string
+  value: string
+  description: string
+}
+
+export interface TradeExecutionPlan {
+  planType: string
+  status: string
+  summary: string
+  referencePrice: number
+  triggerPrice: number
+  stopLossPrice: number
+  targetPrice: number
+  riskRewardRatio: number
+  suggestedCapital: number | null
+  estimatedShares: number | null
+  observationDays: number
+  maxHoldingDays: number
+  maxEntryGapPct: number
+  entryRules: ExecutionPlanRule[]
+  holdRules: ExecutionPlanRule[]
+  exitRules: ExecutionPlanRule[]
+  invalidationRules: ExecutionPlanRule[]
 }
 
 export interface CandidateItem {
@@ -68,6 +95,7 @@ export interface CandidateItem {
   riskRewardRatio: number
   explanation: string
   scoreDetails: ScoreRuleDetail[]
+  executionPlan: TradeExecutionPlan | null
 }
 
 export interface SignalItem {
@@ -87,6 +115,7 @@ export interface SignalItem {
   estimatedShares: number
   explanation: string
   generatedAtUtc: string
+  executionPlan: TradeExecutionPlan | null
 }
 
 export interface IndustryItem {
@@ -113,6 +142,12 @@ export interface FinancialItem {
   revenueYoy: number | null
   netProfitYoy: number | null
   freeFloatMarketCap: number | null
+  operatingCashFlow: number | null
+  grossMargin: number | null
+  debtToAssetRatio: number | null
+  operatingCashFlowNet: number | null
+  announcementDate: string | null
+  dataSourcePriority: string | null
 }
 
 export interface PriceSeriesPoint {
@@ -135,6 +170,25 @@ export interface FinancialSummary {
   roe: number | null
   revenueYoy: number | null
   netProfitYoy: number | null
+  operatingCashFlow: number | null
+  grossMargin: number | null
+  debtToAssetRatio: number | null
+  operatingCashFlowNet: number | null
+  announcementDate: string | null
+  dataSourcePriority: string | null
+}
+
+export interface FundFlowSummary {
+  tradeDate: string
+  mainNetAmount: number | null
+  mainNetPct: number | null
+  superLargeNetAmount: number | null
+  superLargeNetPct: number | null
+  rankPercentile5d: number | null
+  industryMainNetAmount: number | null
+  industryMainNetPct: number | null
+  industryRank: number | null
+  industryRankPercentile: number | null
 }
 
 export interface IndicatorSummary {
@@ -152,16 +206,32 @@ export interface IndicatorSummary {
   distanceToMa20Pct: number
 }
 
+export interface LhbSummary {
+  isOnLhbToday: boolean
+  tradeDate: string | null
+  reason: string | null
+  netAmount: number | null
+  institutionNetAmount: number | null
+  institutionBuyCount: number | null
+  isInstitutionNetBuy: boolean
+  recent20dLhbCount: number
+  daysSinceLastLhb: number | null
+  riskFlags: string | null
+}
+
 export interface StockDetailResponse {
   stockCode: string
   stockName: string
   industryName: string | null
+  scoringIndustryName: string | null
   tradeDate: string
   snapshotVersion: SnapshotVersion
   snapshotVersionName: string
   latestBar: PriceSeriesPoint
   financial: FinancialSummary | null
   indicator: IndicatorSummary | null
+  fundFlow: FundFlowSummary | null
+  lhb: LhbSummary | null
   candidate: CandidateItem | null
   signal: SignalItem | null
   recentBars: PriceSeriesPoint[]
@@ -351,7 +421,13 @@ export interface SimulatedPositionItem {
   latestTradeDate: string | null
   floatingProfitAmount: number
   floatingProfitPct: number
+  heldDays: number
   status: string
+  adviceStatus: string
+  adviceTitle: string
+  adviceText: string
+  adviceTags: string[]
+  executionPlan: TradeExecutionPlan | null
   openedAtUtc: string
   closedAtUtc: string | null
   exitPrice: number | null

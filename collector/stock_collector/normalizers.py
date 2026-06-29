@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -33,6 +34,8 @@ def parse_trade_date(raw_value: Any) -> date | None:
         return raw_value.date()
 
     text = str(raw_value).strip().replace("/", "-").replace(".", "-")
+    if text.lower() in {"nan", "nat", "none"}:
+        return None
     if len(text) == 8 and text.isdigit():
         text = f"{text[0:4]}-{text[4:6]}-{text[6:8]}"
     return date.fromisoformat(text)
@@ -44,14 +47,17 @@ def parse_decimal(raw_value: Any) -> Decimal | None:
     if isinstance(raw_value, bool):
         return None
     if isinstance(raw_value, Decimal):
-        return raw_value
+        return raw_value if raw_value.is_finite() else None
     if isinstance(raw_value, (int, float)):
+        if isinstance(raw_value, float) and not math.isfinite(raw_value):
+            return None
         return Decimal(str(raw_value))
 
     text = str(raw_value).strip().replace(",", "").replace("%", "")
-    if not text:
+    if not text or text.lower() in {"nan", "nat", "none", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}:
         return None
-    return Decimal(text)
+    value = Decimal(text)
+    return value if value.is_finite() else None
 
 
 def parse_integer(raw_value: Any) -> int | None:
@@ -75,6 +81,21 @@ def make_payload_hash(payload: Any) -> str:
 
 def count_missing_fields(record: dict[str, Any], required_fields: set[str]) -> int:
     return sum(1 for field in required_fields if record.get(field) in (None, "", "-", "--"))
+
+
+def normalize_industry_name(raw_value: Any) -> str | None:
+    value = _optional_text(raw_value)
+    if value is None:
+        return None
+
+    generic_prefixes = tuple(f"{prefix} " for prefix in "ABCDEFGHIJKLMNOPQRS")
+    if value.startswith(generic_prefixes):
+        return None
+
+    if value in {"制造业", "金融业", "房地产业", "建筑业", "农林牧渔业", "采矿业"}:
+        return None
+
+    return value
 
 
 @dataclass(frozen=True)
@@ -136,7 +157,7 @@ def normalize_stock_snapshot(raw: dict[str, Any], audit: AuditContext) -> dict[s
         "stock_code": stock_code,
         "stock_name": stock_name,
         "market": _infer_market(stock_code),
-        "industry_name": _optional_text(
+        "industry_name": normalize_industry_name(
             _first_present(
                 raw,
                 "\u6240\u5904\u884c\u4e1a",
@@ -227,10 +248,15 @@ def normalize_financial_snapshot(
         "pe": parse_decimal(_first_present(raw, "\u5e02\u76c8\u7387", "\u5e02\u76c8\u7387TTM", "\u5e02\u76c8\u7387(TTM)", "甯傜泩鐜?", "pe")),
         "pb": parse_decimal(_first_present(raw, "\u5e02\u51c0\u7387", "甯傚噣鐜?", "pb")),
         "roe": parse_decimal(_first_present(raw, "\u51c0\u8d44\u4ea7\u6536\u76ca\u7387", "鍑€璧勪骇鏀剁泭鐜?", "roe")),
-        "revenue_yoy": parse_decimal(_first_present(raw, "\u8425\u4e1a\u6536\u5165\u540c\u6bd4\u589e\u957f", "钀ヤ笟鏀跺叆鍚屾瘮澧為暱", "revenue_yoy")),
-        "net_profit_yoy": parse_decimal(_first_present(raw, "\u51c0\u5229\u6da6\u540c\u6bd4\u589e\u957f", "鍑€鍒╂鼎鍚屾瘮澧為暱", "net_profit_yoy")),
+        "revenue_yoy": parse_decimal(_first_present(raw, "\u8425\u4e1a\u6536\u5165\u540c\u6bd4\u589e\u957f", "\u8425\u4e1a\u603b\u6536\u5165-\u540c\u6bd4\u589e\u957f", "\u8425\u4e1a\u603b\u6536\u5165\u540c\u6bd4", "钀ヤ笟鏀跺叆鍚屾瘮澧為暱", "revenue_yoy")),
+        "net_profit_yoy": parse_decimal(_first_present(raw, "\u51c0\u5229\u6da6\u540c\u6bd4\u589e\u957f", "\u51c0\u5229\u6da6-\u540c\u6bd4\u589e\u957f", "\u51c0\u5229\u6da6\u540c\u6bd4", "鍑€鍒╂鼎鍚屾瘮澧為暱", "net_profit_yoy")),
         "free_float_market_cap": parse_decimal(_first_present(raw, "\u6d41\u901a\u5e02\u503c", "娴侀€氬競鍊?", "free_float_market_cap")),
-        "operating_cash_flow": parse_decimal(_first_present(raw, "\u6bcf\u80a1\u7ecf\u8425\u6027\u73b0\u91d1\u6d41", "姣忚偂缁忚惀鎬х幇閲戞祦", "operating_cash_flow")),
+        "operating_cash_flow": parse_decimal(_first_present(raw, "\u6bcf\u80a1\u7ecf\u8425\u6027\u73b0\u91d1\u6d41", "\u6bcf\u80a1\u7ecf\u8425\u73b0\u91d1\u6d41\u91cf", "姣忚偂缁忚惀鎬х幇閲戞祦", "operating_cash_flow")),
+        "gross_margin": parse_decimal(_first_present(raw, "\u9500\u552e\u6bdb\u5229\u7387", "gross_margin")),
+        "debt_to_asset_ratio": parse_decimal(_first_present(raw, "\u8d44\u4ea7\u8d1f\u503a\u7387", "debt_to_asset_ratio")),
+        "operating_cash_flow_net": parse_decimal(_first_present(raw, "\u7ecf\u8425\u6027\u73b0\u91d1\u6d41-\u73b0\u91d1\u6d41\u91cf\u51c0\u989d", "operating_cash_flow_net")),
+        "announcement_date": parse_trade_date(_first_present(raw, "\u6700\u65b0\u516c\u544a\u65e5\u671f", "\u516c\u544a\u65e5\u671f", "announcement_date")),
+        "data_source_priority": _first_present(raw, "data_source_priority", default=None),
         **build_audit_columns(raw, audit, report_date=report_date),
     }
     normalized["missing_field_count"] = count_missing_fields(normalized, {"stock_code", "report_date"})
@@ -248,6 +274,64 @@ def normalize_industry_stat(raw: dict[str, Any], audit: AuditContext) -> dict[st
         "member_count": parse_integer(_first_present(raw, "\u6210\u5206\u80a1\u6570\u91cf", "鎴愬垎鑲℃暟閲?", "member_count")),
         **build_audit_columns(raw, audit, trade_date=trade_date),
     }
+
+
+def normalize_stock_fund_flow(raw: dict[str, Any], audit: AuditContext, *, stock_code: str) -> dict[str, Any]:
+    trade_date = parse_trade_date(_first_present(raw, "trade_date", "日期", "交易日期")) or audit.trade_date
+    normalized = {
+        "stock_code": stock_code,
+        "trade_date": trade_date,
+        "main_net_amount": parse_decimal(_first_present(raw, "main_net_amount", "主力净流入-净额", "主力净额")),
+        "main_net_pct": parse_decimal(_first_present(raw, "main_net_pct", "主力净流入-净占比", "主力净占比")),
+        "super_large_net_amount": parse_decimal(_first_present(raw, "super_large_net_amount", "超大单净流入-净额", "超大单净额")),
+        "super_large_net_pct": parse_decimal(_first_present(raw, "super_large_net_pct", "超大单净流入-净占比", "超大单净占比")),
+        "large_net_amount": parse_decimal(_first_present(raw, "large_net_amount", "大单净流入-净额", "大单净额")),
+        "large_net_pct": parse_decimal(_first_present(raw, "large_net_pct", "大单净流入-净占比", "大单净占比")),
+        "medium_net_amount": parse_decimal(_first_present(raw, "medium_net_amount", "中单净流入-净额", "中单净额")),
+        "medium_net_pct": parse_decimal(_first_present(raw, "medium_net_pct", "中单净流入-净占比", "中单净占比")),
+        "small_net_amount": parse_decimal(_first_present(raw, "small_net_amount", "小单净流入-净额", "小单净额")),
+        "small_net_pct": parse_decimal(_first_present(raw, "small_net_pct", "小单净流入-净占比", "小单净占比")),
+        **build_audit_columns(raw, audit, trade_date=trade_date),
+    }
+    normalized["missing_field_count"] = count_missing_fields(normalized, {"stock_code", "trade_date"})
+    return normalized
+
+
+def normalize_industry_fund_flow(raw: dict[str, Any], audit: AuditContext) -> dict[str, Any]:
+    trade_date = parse_trade_date(_first_present(raw, "trade_date", "日期", "交易日期")) or audit.trade_date
+    normalized = {
+        "industry_name": str(_first_present(raw, "industry_name", "行业", "行业名称", "名称", default="")).strip(),
+        "trade_date": trade_date,
+        "main_net_amount": parse_decimal(_first_present(raw, "main_net_amount", "主力净流入-净额", "主力净额", "今日主力净流入-净额", "5日主力净流入-净额", "10日主力净流入-净额", "净额")),
+        "main_net_pct": parse_decimal(_first_present(raw, "main_net_pct", "主力净流入-净占比", "主力净占比", "今日主力净流入-净占比", "5日主力净流入-净占比", "10日主力净流入-净占比")),
+        "rank": parse_integer(_first_present(raw, "rank", "排名", "序号")),
+        **build_audit_columns(raw, audit, trade_date=trade_date),
+    }
+    normalized["missing_field_count"] = count_missing_fields(normalized, {"industry_name", "trade_date"})
+    return normalized
+
+
+def normalize_lhb_stock_summary(raw: dict[str, Any], audit: AuditContext, *, stock_code: str) -> dict[str, Any]:
+    trade_date = parse_trade_date(_first_present(raw, "trade_date", "上榜日", "上榜日期", "日期"))
+    institution_buy_amount = parse_decimal(_first_present(raw, "institution_buy_amount", "机构买入总额", "机构买入额"))
+    institution_sell_amount = parse_decimal(_first_present(raw, "institution_sell_amount", "机构卖出总额", "机构卖出额"))
+    institution_net_amount = parse_decimal(_first_present(raw, "institution_net_amount", "机构买入净额", "机构净买额"))
+    normalized = {
+        "stock_code": stock_code,
+        "trade_date": trade_date,
+        "reason": _optional_text(_first_present(raw, "reason", "上榜原因", "指标")),
+        "buy_top5_amount": parse_decimal(_first_present(raw, "buy_top5_amount", "龙虎榜买入额", "买方前五合计", "买入总金额")),
+        "sell_top5_amount": parse_decimal(_first_present(raw, "sell_top5_amount", "龙虎榜卖出额", "卖方前五合计", "卖出总金额")),
+        "net_amount": parse_decimal(_first_present(raw, "net_amount", "龙虎榜净买额", "净额", "净买额")),
+        "institution_buy_amount": institution_buy_amount,
+        "institution_sell_amount": institution_sell_amount,
+        "institution_net_amount": institution_net_amount,
+        "institution_buy_count": parse_integer(_first_present(raw, "institution_buy_count", "买方机构数", "机构买入家数")),
+        "is_institution_net_buy": (institution_net_amount or Decimal("0")) > 0,
+        **build_audit_columns(raw, audit, trade_date=trade_date),
+    }
+    normalized["missing_field_count"] = count_missing_fields(normalized, {"stock_code", "trade_date"})
+    return normalized
 
 
 def build_ingestion_log(

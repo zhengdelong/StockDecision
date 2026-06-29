@@ -67,11 +67,11 @@ function resolvePositionMetrics(position: SimulatedPositionItem) {
 }
 
 function resolvePositionTone(position: SimulatedPositionItem): 'positive' | 'warning' | 'neutral' {
-  if ((position.floatingProfitPct ?? 0) >= 5) {
+  if (position.adviceStatus === 'profit' || position.adviceStatus === 'take_profit') {
     return 'positive'
   }
 
-  if ((position.floatingProfitPct ?? 0) <= -3) {
+  if (position.adviceStatus === 'risk' || position.adviceStatus === 'timeout') {
     return 'warning'
   }
 
@@ -79,21 +79,7 @@ function resolvePositionTone(position: SimulatedPositionItem): 'positive' | 'war
 }
 
 function resolvePositionJudgement(position: SimulatedPositionItem): string {
-  const metrics = resolvePositionMetrics(position)
-
-  if ((metrics.distanceToStopPct ?? 999) <= 2) {
-    return '接近止损，优先看纪律'
-  }
-
-  if ((metrics.distanceToTargetPct ?? 999) <= 3) {
-    return '接近目标位，注意兑现'
-  }
-
-  if ((position.floatingProfitPct ?? 0) > 0) {
-    return '浮盈持有，继续跟踪'
-  }
-
-  return '仍在观察区间'
+  return position.adviceTitle
 }
 </script>
 
@@ -163,7 +149,7 @@ function resolvePositionJudgement(position: SimulatedPositionItem): string {
                 <div class="candidate-cell-main">
                   <strong>{{ position.stockName }}</strong>
                   <span>{{ position.stockCode }}{{ position.industryName ? ` / ${position.industryName}` : '' }}</span>
-                  <small>{{ position.strategyType }} / 开仓 {{ position.tradeDate }}</small>
+                  <small>{{ position.strategyType }} / 开仓 {{ position.tradeDate }} / 已持有 {{ position.heldDays }} 天</small>
                 </div>
               </td>
               <td>
@@ -202,9 +188,10 @@ function resolvePositionJudgement(position: SimulatedPositionItem): string {
               <td>
                 <div class="candidate-status-cell">
                   <span :class="['pill', resolvePositionTone(position)]">
-                    {{ resolvePositionTone(position) === 'positive' ? '浮盈' : resolvePositionTone(position) === 'warning' ? '承压' : '观察中' }}
+                    {{ position.adviceTitle }}
                   </span>
-                  <small>{{ resolvePositionJudgement(position) }}</small>
+                  <small>{{ position.adviceText }}</small>
+                  <small v-if="position.adviceTags.length">{{ position.adviceTags.join(' / ') }}</small>
                 </div>
               </td>
               <td>

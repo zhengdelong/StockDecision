@@ -23,9 +23,10 @@ export function buildScoreRows(scoreBreakdown: ScoreBreakdown | null | undefined
 
   return [
     { key: 'rs', label: '相对强弱', value: scoreBreakdown.relativeStrengthScore, max: 30 },
-    { key: 'trend', label: '趋势', value: scoreBreakdown.trendScore, max: 25 },
-    { key: 'volume', label: '量价', value: scoreBreakdown.volumePriceScore, max: 25 },
-    { key: 'fundamental', label: '基本面', value: scoreBreakdown.fundamentalScore, max: 20 },
+    { key: 'trend', label: '趋势质量', value: scoreBreakdown.trendScore, max: 25 },
+    { key: 'volume', label: '量价确认', value: scoreBreakdown.volumePriceScore, max: 20 },
+    { key: 'fundamental', label: '基本面质量', value: scoreBreakdown.fundamentalScore, max: 15 },
+    { key: 'risk', label: '风险纪律', value: scoreBreakdown.riskDisciplineScore, max: 10 },
   ]
 }
 

@@ -15,5 +15,5 @@ public sealed class SystemSummaryOptions
     public string Mode { get; set; } = "双版本选股决策支持";
 
     /// <summary>策略版本号。</summary>
-    public string StrategyVersion { get; set; } = "a-share-20k-v1";
+    public string StrategyVersion { get; set; } = "a-share-20k-v2";
 }

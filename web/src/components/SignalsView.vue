@@ -74,6 +74,16 @@ function resolveExecutionLabel(item: SignalItem): string {
 
   return '需要挑选'
 }
+
+function resolveHeadlineExplanation(explanation: string | null | undefined): string {
+  if (!explanation) {
+    return '暂无结论摘要'
+  }
+
+  const normalized = explanation.replace(/\s+/g, ' ').trim()
+  const firstSentence = normalized.split('。').find((item) => item.trim().length > 0)
+  return firstSentence ? `${firstSentence}。` : normalized
+}
 </script>
 
 <template>
@@ -176,6 +186,7 @@ function resolveExecutionLabel(item: SignalItem): string {
               <div class="candidate-status-cell">
                 <span class="pill positive">可执行</span>
                 <small>{{ item.eligibilityReasons[0] ?? resolveExecutionLabel(item) }}</small>
+                <small class="cell-summary">{{ resolveHeadlineExplanation(item.explanation) }}</small>
               </div>
             </td>
           </tr>

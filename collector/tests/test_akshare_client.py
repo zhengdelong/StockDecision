@@ -179,6 +179,37 @@ class FinancialThsProvider:
         }]
 
 
+class EastMoneyFinancialReportProvider:
+    def stock_yjbb_em(self, date: str):
+        assert date == "20260331"
+        return [{
+            "股票代码": "1",
+            "净资产收益率": "12.5",
+            "营业总收入-同比增长": "8.0",
+            "净利润-同比增长": "9.0",
+            "每股经营现金流量": "0.53",
+            "销售毛利率": "31.2",
+            "最新公告日期": "2026-04-30",
+        }]
+
+    def stock_lrb_em(self, date: str):
+        assert date == "20260331"
+        return [{
+            "股票代码": "000001",
+            "营业总收入同比": "8.1",
+            "净利润同比": "9.2",
+            "公告日期": "2026-04-30",
+        }]
+
+    def stock_zcfz_em(self, date: str):
+        assert date == "20260331"
+        return [{"股票代码": "sz000001", "资产负债率": "41.3"}]
+
+    def stock_xjll_em(self, date: str):
+        assert date == "20260331"
+        return [{"股票代码": "000001", "经营性现金流-现金流量净额": "123456789"}]
+
+
 def test_health_reports_ready_when_provider_is_injected() -> None:
     client = AkshareClient(provider=object())
 
@@ -393,6 +424,26 @@ def test_fetch_financial_snapshots_maps_pe_pb_from_ths_payload() -> None:
         "市净率": "1.43",
         "净资产收益率": "12.5",
     }]
+
+
+def test_fetch_financial_report_snapshots_merges_eastmoney_full_market_payloads() -> None:
+    client = AkshareClient(provider=EastMoneyFinancialReportProvider())
+
+    rows = client.fetch_financial_report_snapshots("20260331")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["stock_code"] == "000001"
+    assert row["report_date"] == "20260331"
+    assert row["roe"] == "12.5"
+    assert row["revenue_yoy"] == "8.1"
+    assert row["net_profit_yoy"] == "9.2"
+    assert row["operating_cash_flow"] == "0.53"
+    assert row["gross_margin"] == "31.2"
+    assert row["debt_to_asset_ratio"] == "41.3"
+    assert row["operating_cash_flow_net"] == "123456789"
+    assert row["announcement_date"] == "2026-04-30"
+    assert row["data_source_priority"] == "eastmoney_report"
 
 
 def test_to_records_rejects_unsupported_payload() -> None:

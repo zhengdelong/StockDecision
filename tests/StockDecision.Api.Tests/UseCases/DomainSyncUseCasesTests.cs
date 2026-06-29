@@ -54,12 +54,42 @@ public class DomainSyncUseCasesTests
         Assert.Equal(0, marketRepository.ReplaceSnapshotCallCount);
     }
 
+    [Fact]
+    public async Task RunDomainSyncUseCase_Should_Inspect_State_Only_Once_When_Sync_Is_Required()
+    {
+        var rawRepository = new FakeRawMarketDataRepository(
+            latestTradeDate: new DateOnly(2026, 6, 23),
+            latestFinancialReportDate: new DateOnly(2026, 3, 31));
+        var marketRepository = new FakeMarketDataRepository(
+            importedTradeDate: new DateOnly(2026, 6, 20),
+            importedFinancialReportDate: new DateOnly(2025, 12, 31));
+        var runRepository = new FakeDomainSyncRunRepository();
+        var ensureUseCase = new EnsureLatestMarketSnapshotUseCase(rawRepository, marketRepository, new StubIngestionLogRepository(), new TradingPermissionsOptions());
+        var runUseCase = new RunDomainSyncUseCase(ensureUseCase, marketRepository, runRepository);
+
+        var result = await runUseCase.ExecuteAsync("poll", cancellationToken: CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(1, rawRepository.GetLatestTradeDateCallCount);
+        Assert.Equal(1, rawRepository.GetLatestFinancialReportDateCallCount);
+        Assert.Equal(1, marketRepository.GetLatestImportedTradeDateCallCount);
+        Assert.Equal(1, marketRepository.GetLatestImportedFinancialReportDateCallCount);
+    }
+
     /// <summary>
     /// 原始层仓储测试替身。
     /// </summary>
     private sealed class FakeRawMarketDataRepository(DateOnly latestTradeDate, DateOnly latestFinancialReportDate) : IRawMarketDataRepository
     {
-        public Task<DateOnly?> GetLatestTradeDateAsync(CancellationToken cancellationToken) => Task.FromResult<DateOnly?>(latestTradeDate);
+        public int GetLatestTradeDateCallCount { get; private set; }
+
+        public int GetLatestFinancialReportDateCallCount { get; private set; }
+
+        public Task<DateOnly?> GetLatestTradeDateAsync(CancellationToken cancellationToken)
+        {
+            GetLatestTradeDateCallCount++;
+            return Task.FromResult<DateOnly?>(latestTradeDate);
+        }
 
         public Task<IReadOnlyList<StockProfile>> GetLatestStockProfilesAsync(DateOnly tradeDate, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<StockProfile>>(
@@ -91,8 +121,20 @@ public class DomainSyncUseCasesTests
                 new FinancialSnapshot("600001", latestFinancialReportDate, 28m, 3.2m, 12.4m, 18.5m, 21.8m, 12_000_000_000m)
             ]);
 
+        public Task<IReadOnlyList<StockFundFlowSnapshot>> GetStockFundFlowsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<StockFundFlowSnapshot>>([]);
+
+        public Task<IReadOnlyList<IndustryFundFlowSnapshot>> GetIndustryFundFlowsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<IndustryFundFlowSnapshot>>([]);
+
+        public Task<IReadOnlyList<LhbSnapshot>> GetLhbSnapshotsByTradeDateAsync(DateOnly tradeDate, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<LhbSnapshot>>([]);
+
         public Task<DateOnly?> GetLatestFinancialReportDateAsync(CancellationToken cancellationToken)
-            => Task.FromResult<DateOnly?>(latestFinancialReportDate);
+        {
+            GetLatestFinancialReportDateCallCount++;
+            return Task.FromResult<DateOnly?>(latestFinancialReportDate);
+        }
     }
 
     /// <summary>
@@ -104,7 +146,15 @@ public class DomainSyncUseCasesTests
 
         public DateOnly? LastReplacedTradeDate { get; private set; }
 
-        public Task<DateOnly?> GetLatestImportedTradeDateAsync(CancellationToken cancellationToken) => Task.FromResult<DateOnly?>(importedTradeDate);
+        public int GetLatestImportedTradeDateCallCount { get; private set; }
+
+        public int GetLatestImportedFinancialReportDateCallCount { get; private set; }
+
+        public Task<DateOnly?> GetLatestImportedTradeDateAsync(CancellationToken cancellationToken)
+        {
+            GetLatestImportedTradeDateCallCount++;
+            return Task.FromResult<DateOnly?>(importedTradeDate);
+        }
 
         public Task ReplaceMarketSnapshotAsync(
             DateOnly tradeDate,
@@ -113,6 +163,9 @@ public class DomainSyncUseCasesTests
             IReadOnlyList<MarketIndexBar> indexBars,
             IReadOnlyList<IndustryDailyStat> industries,
             IReadOnlyList<FinancialSnapshot> financials,
+            IReadOnlyList<StockFundFlowSnapshot> stockFundFlows,
+            IReadOnlyList<IndustryFundFlowSnapshot> industryFundFlows,
+            IReadOnlyList<LhbSnapshot> lhbSnapshots,
             CancellationToken cancellationToken)
         {
             ReplaceSnapshotCallCount++;
@@ -125,6 +178,15 @@ public class DomainSyncUseCasesTests
 
         public Task<IReadOnlyList<DailyBar>> GetDailyBarHistoryAsync(string stockCode, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<DailyBar>>([]);
+
+        public Task<IReadOnlyDictionary<string, IReadOnlyList<DailyBar>>> GetDailyBarHistoriesByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<DailyBar>>>(new Dictionary<string, IReadOnlyList<DailyBar>>());
+
+        public Task<IReadOnlyDictionary<string, StockScoringHistoryMetrics>> GetScoringHistoryMetricsByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, StockScoringHistoryMetrics>>(new Dictionary<string, StockScoringHistoryMetrics>());
+
+        public Task<IReadOnlyDictionary<string, IndicatorCalculationMetrics>> GetIndicatorCalculationMetricsByCodesAsync(IEnumerable<string> stockCodes, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, IndicatorCalculationMetrics>>(new Dictionary<string, IndicatorCalculationMetrics>());
 
         public Task<IReadOnlyList<DailyBar>> GetForwardDailyBarsAsync(string stockCode, DateOnly tradeDate, int maxRows, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<DailyBar>>([]);
@@ -144,8 +206,20 @@ public class DomainSyncUseCasesTests
         public Task<IReadOnlyList<FinancialSnapshot>> GetLatestFinancialSnapshotsAsync(CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<FinancialSnapshot>>([]);
 
+        public Task<IReadOnlyDictionary<string, StockFundFlowSnapshot>> GetStockFundFlowsByCodesAsync(DateOnly tradeDate, IEnumerable<string> stockCodes, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, StockFundFlowSnapshot>>(new Dictionary<string, StockFundFlowSnapshot>());
+
+        public Task<IReadOnlyDictionary<string, IndustryFundFlowSnapshot>> GetIndustryFundFlowsByNamesAsync(DateOnly tradeDate, IEnumerable<string?> industryNames, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, IndustryFundFlowSnapshot>>(new Dictionary<string, IndustryFundFlowSnapshot>());
+
+        public Task<IReadOnlyDictionary<string, LhbSnapshot>> GetLhbSnapshotsByCodesAsync(DateOnly tradeDate, IEnumerable<string> stockCodes, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyDictionary<string, LhbSnapshot>>(new Dictionary<string, LhbSnapshot>());
+
         public Task<DateOnly?> GetLatestImportedFinancialReportDateAsync(CancellationToken cancellationToken)
-            => Task.FromResult<DateOnly?>(importedFinancialReportDate);
+        {
+            GetLatestImportedFinancialReportDateCallCount++;
+            return Task.FromResult<DateOnly?>(importedFinancialReportDate);
+        }
 
         public Task<IReadOnlyList<IndustryDailyStat>> GetIndustryStatsAsync(DateOnly tradeDate, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<IndustryDailyStat>>([]);
@@ -159,7 +233,14 @@ public class DomainSyncUseCasesTests
 
         public Task UpsertCandidatesAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<CandidateStock> candidates, CancellationToken cancellationToken) => Task.CompletedTask;
 
+        public Task UpsertScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<StrategyScoreSnapshot> scores, CancellationToken cancellationToken) => Task.CompletedTask;
+
         public Task UpsertSignalsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<TradeSignal> signals, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<int> CountScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken) => Task.FromResult(0);
+
+        public Task<PagedResponse<FinancialListItemResponse>> GetFinancialScorePageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FinancialListQuery query, CancellationToken cancellationToken)
+            => Task.FromResult(new PagedResponse<FinancialListItemResponse>([], 1, query.PageSize, 0));
 
         public Task<IReadOnlyList<IndicatorSnapshot>> GetIndicatorSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<IndicatorSnapshot>>([]);

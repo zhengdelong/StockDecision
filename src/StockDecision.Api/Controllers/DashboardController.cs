@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using StockDecision.Application.MarketPipeline;
+using StockDecision.Domain.Strategy;
 
 namespace StockDecision.Api.Controllers;
 
@@ -16,8 +17,8 @@ public sealed class DashboardController(GetDashboardUseCase getDashboardUseCase)
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] string? snapshotVersion, CancellationToken cancellationToken)
     {
-        _ = snapshotVersion;
-        var response = await getDashboardUseCase.ExecuteAsync(cancellationToken: cancellationToken);
+        var resolvedSnapshotVersion = StrategySnapshotVersionCodec.ParseOrDefault(snapshotVersion);
+        var response = await getDashboardUseCase.ExecuteAsync(resolvedSnapshotVersion, cancellationToken);
         return Ok(response);
     }
 }

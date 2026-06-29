@@ -18,6 +18,12 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
     public DbSet<RawIndustryDailyStatRow> RawIndustryDailyStats => Set<RawIndustryDailyStatRow>();
     /// <summary>原始财务快照表。</summary>
     public DbSet<RawFinancialSnapshotRow> RawFinancialSnapshots => Set<RawFinancialSnapshotRow>();
+    /// <summary>原始个股资金流表。</summary>
+    public DbSet<RawStockFundFlowRow> RawStockFundFlows => Set<RawStockFundFlowRow>();
+    /// <summary>原始行业资金流表。</summary>
+    public DbSet<RawIndustryFundFlowRow> RawIndustryFundFlows => Set<RawIndustryFundFlowRow>();
+    /// <summary>原始龙虎榜汇总表。</summary>
+    public DbSet<RawLhbStockSummaryRow> RawLhbStockSummaries => Set<RawLhbStockSummaryRow>();
     /// <summary>采集日志表。</summary>
     public DbSet<DataIngestionLogRow> DataIngestionLogs => Set<DataIngestionLogRow>();
     /// <summary>领域同步运行日志表。</summary>
@@ -33,12 +39,20 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
     public DbSet<MarketIndustryDailyStatEntity> MarketIndustryDailyStats => Set<MarketIndustryDailyStatEntity>();
     /// <summary>领域层财务快照表。</summary>
     public DbSet<MarketFinancialSnapshotEntity> MarketFinancialSnapshots => Set<MarketFinancialSnapshotEntity>();
+    /// <summary>领域层个股资金流表。</summary>
+    public DbSet<MarketStockFundFlowEntity> MarketStockFundFlows => Set<MarketStockFundFlowEntity>();
+    /// <summary>领域层行业资金流表。</summary>
+    public DbSet<MarketIndustryFundFlowEntity> MarketIndustryFundFlows => Set<MarketIndustryFundFlowEntity>();
+    /// <summary>领域层龙虎榜快照表。</summary>
+    public DbSet<MarketLhbSnapshotEntity> MarketLhbSnapshots => Set<MarketLhbSnapshotEntity>();
     /// <summary>技术指标快照表。</summary>
     public DbSet<StrategyIndicatorSnapshotEntity> StrategyIndicatorSnapshots => Set<StrategyIndicatorSnapshotEntity>();
     /// <summary>市场环境快照表。</summary>
     public DbSet<StrategyMarketRegimeEntity> StrategyMarketRegimes => Set<StrategyMarketRegimeEntity>();
     /// <summary>候选股结果表。</summary>
     public DbSet<StrategyCandidateEntity> StrategyCandidates => Set<StrategyCandidateEntity>();
+    /// <summary>全市场综合得分快照表。</summary>
+    public DbSet<StrategyScoreSnapshotEntity> StrategyScoreSnapshots => Set<StrategyScoreSnapshotEntity>();
     /// <summary>交易信号结果表。</summary>
     public DbSet<StrategyTradeSignalEntity> StrategyTradeSignals => Set<StrategyTradeSignalEntity>();
     public DbSet<SimulatedPositionEntity> SimulatedPositions => Set<SimulatedPositionEntity>();
@@ -142,6 +156,59 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.RevenueYoy).HasColumnName("revenue_yoy").HasPrecision(18, 4);
             entity.Property(static item => item.NetProfitYoy).HasColumnName("net_profit_yoy").HasPrecision(18, 4);
             entity.Property(static item => item.FreeFloatMarketCap).HasColumnName("free_float_market_cap").HasPrecision(20, 2);
+            entity.Property(static item => item.OperatingCashFlow).HasColumnName("operating_cash_flow").HasPrecision(20, 2);
+            entity.Property(static item => item.GrossMargin).HasColumnName("gross_margin").HasPrecision(18, 4);
+            entity.Property(static item => item.DebtToAssetRatio).HasColumnName("debt_to_asset_ratio").HasPrecision(18, 4);
+            entity.Property(static item => item.OperatingCashFlowNet).HasColumnName("operating_cash_flow_net").HasPrecision(20, 2);
+            entity.Property(static item => item.AnnouncementDate).HasColumnName("announcement_date");
+            entity.Property(static item => item.DataSourcePriority).HasColumnName("data_source_priority").HasMaxLength(32);
+        });
+
+        modelBuilder.Entity<RawStockFundFlowRow>(entity =>
+        {
+            entity.ToTable("raw_stock_fund_flows");
+            entity.HasKey(static item => item.Id);
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.MainNetAmount).HasColumnName("main_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MainNetPct).HasColumnName("main_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.SuperLargeNetAmount).HasColumnName("super_large_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SuperLargeNetPct).HasColumnName("super_large_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.LargeNetAmount).HasColumnName("large_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.LargeNetPct).HasColumnName("large_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.MediumNetAmount).HasColumnName("medium_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MediumNetPct).HasColumnName("medium_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.SmallNetAmount).HasColumnName("small_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SmallNetPct).HasColumnName("small_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.RankPercentile5d).HasColumnName("rank_percentile_5d").HasPrecision(10, 4);
+        });
+
+        modelBuilder.Entity<RawIndustryFundFlowRow>(entity =>
+        {
+            entity.ToTable("raw_industry_fund_flows");
+            entity.HasKey(static item => item.Id);
+            entity.Property(static item => item.IndustryName).HasColumnName("industry_name");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.MainNetAmount).HasColumnName("main_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MainNetPct).HasColumnName("main_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.Rank).HasColumnName("rank");
+        });
+
+        modelBuilder.Entity<RawLhbStockSummaryRow>(entity =>
+        {
+            entity.ToTable("raw_lhb_stock_summaries");
+            entity.HasKey(static item => item.Id);
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.Reason).HasColumnName("reason");
+            entity.Property(static item => item.BuyTop5Amount).HasColumnName("buy_top5_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SellTop5Amount).HasColumnName("sell_top5_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.NetAmount).HasColumnName("net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionBuyAmount).HasColumnName("institution_buy_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionSellAmount).HasColumnName("institution_sell_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionNetAmount).HasColumnName("institution_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionBuyCount).HasColumnName("institution_buy_count");
+            entity.Property(static item => item.IsInstitutionNetBuy).HasColumnName("is_institution_net_buy");
         });
 
         modelBuilder.Entity<DataIngestionLogRow>(entity =>
@@ -182,6 +249,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
             entity.Property(static item => item.StockName).HasColumnName("stock_name");
             entity.Property(static item => item.IndustryName).HasColumnName("industry_name");
+            entity.Property(static item => item.ScoringIndustryName).HasColumnName("scoring_industry_name");
             entity.Property(static item => item.IsActive).HasColumnName("is_active");
             entity.Property(static item => item.IsSt).HasColumnName("is_st");
             entity.Property(static item => item.IsDelistingRisk).HasColumnName("is_delisting_risk");
@@ -195,6 +263,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.StockCode).HasMaxLength(16);
             entity.Property(static item => item.StockName).HasMaxLength(64);
             entity.Property(static item => item.IndustryName).HasMaxLength(64);
+            entity.Property(static item => item.ScoringIndustryName).HasMaxLength(64);
             entity.Property(static item => item.LatestPrice).HasPrecision(18, 4);
             entity.Property(static item => item.Pe).HasPrecision(18, 4);
             entity.Property(static item => item.Pb).HasPrecision(18, 4);
@@ -263,12 +332,74 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.RevenueYoy).HasColumnName("revenue_yoy");
             entity.Property(static item => item.NetProfitYoy).HasColumnName("net_profit_yoy");
             entity.Property(static item => item.FreeFloatMarketCap).HasColumnName("free_float_market_cap");
+            entity.Property(static item => item.OperatingCashFlow).HasColumnName("operating_cash_flow");
+            entity.Property(static item => item.GrossMargin).HasColumnName("gross_margin");
+            entity.Property(static item => item.DebtToAssetRatio).HasColumnName("debt_to_asset_ratio");
+            entity.Property(static item => item.OperatingCashFlowNet).HasColumnName("operating_cash_flow_net");
+            entity.Property(static item => item.AnnouncementDate).HasColumnName("announcement_date");
+            entity.Property(static item => item.DataSourcePriority).HasColumnName("data_source_priority").HasMaxLength(32);
             entity.Property(static item => item.Pe).HasPrecision(18, 4);
             entity.Property(static item => item.Pb).HasPrecision(18, 4);
             entity.Property(static item => item.Roe).HasPrecision(18, 4);
             entity.Property(static item => item.RevenueYoy).HasPrecision(18, 4);
             entity.Property(static item => item.NetProfitYoy).HasPrecision(18, 4);
             entity.Property(static item => item.FreeFloatMarketCap).HasPrecision(20, 2);
+            entity.Property(static item => item.OperatingCashFlow).HasPrecision(20, 2);
+            entity.Property(static item => item.GrossMargin).HasPrecision(18, 4);
+            entity.Property(static item => item.DebtToAssetRatio).HasPrecision(18, 4);
+            entity.Property(static item => item.OperatingCashFlowNet).HasPrecision(20, 2);
+        });
+
+        modelBuilder.Entity<MarketStockFundFlowEntity>(entity =>
+        {
+            entity.ToTable("market_stock_fund_flows");
+            entity.HasKey(static item => new { item.StockCode, item.TradeDate });
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.MainNetAmount).HasColumnName("main_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MainNetPct).HasColumnName("main_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.SuperLargeNetAmount).HasColumnName("super_large_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SuperLargeNetPct).HasColumnName("super_large_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.LargeNetAmount).HasColumnName("large_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.LargeNetPct).HasColumnName("large_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.MediumNetAmount).HasColumnName("medium_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MediumNetPct).HasColumnName("medium_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.SmallNetAmount).HasColumnName("small_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SmallNetPct).HasColumnName("small_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.RankPercentile5d).HasColumnName("rank_percentile_5d").HasPrecision(10, 4);
+        });
+
+        modelBuilder.Entity<MarketIndustryFundFlowEntity>(entity =>
+        {
+            entity.ToTable("market_industry_fund_flows");
+            entity.HasKey(static item => new { item.IndustryName, item.TradeDate });
+            entity.Property(static item => item.IndustryName).HasColumnName("industry_name");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.MainNetAmount).HasColumnName("main_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.MainNetPct).HasColumnName("main_net_pct").HasPrecision(10, 4);
+            entity.Property(static item => item.Rank).HasColumnName("rank");
+            entity.Property(static item => item.RankPercentile).HasColumnName("rank_percentile").HasPrecision(10, 4);
+        });
+
+        modelBuilder.Entity<MarketLhbSnapshotEntity>(entity =>
+        {
+            entity.ToTable("market_lhb_snapshots");
+            entity.HasKey(static item => new { item.StockCode, item.TradeDate });
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code");
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.Reason).HasColumnName("reason");
+            entity.Property(static item => item.BuyTop5Amount).HasColumnName("buy_top5_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.SellTop5Amount).HasColumnName("sell_top5_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.NetAmount).HasColumnName("net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionBuyAmount).HasColumnName("institution_buy_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionSellAmount).HasColumnName("institution_sell_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionNetAmount).HasColumnName("institution_net_amount").HasPrecision(20, 2);
+            entity.Property(static item => item.InstitutionBuyCount).HasColumnName("institution_buy_count");
+            entity.Property(static item => item.IsInstitutionNetBuy).HasColumnName("is_institution_net_buy");
+            entity.Property(static item => item.IsOnLhbToday).HasColumnName("is_on_lhb_today");
+            entity.Property(static item => item.Recent20dLhbCount).HasColumnName("recent_20d_lhb_count");
+            entity.Property(static item => item.DaysSinceLastLhb).HasColumnName("days_since_last_lhb");
+            entity.Property(static item => item.RiskFlags).HasColumnName("risk_flags");
         });
 
         modelBuilder.Entity<StrategyIndicatorSnapshotEntity>(entity =>
@@ -338,6 +469,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TrendScorePart).HasColumnName("trend_score_part");
             entity.Property(static item => item.VolumePriceScorePart).HasColumnName("volume_price_score_part");
             entity.Property(static item => item.FundamentalScorePart).HasColumnName("fundamental_score_part");
+            entity.Property(static item => item.RiskDisciplineScorePart).HasColumnName("risk_discipline_score_part");
             entity.Property(static item => item.Close).HasColumnName("close");
             entity.Property(static item => item.Ma20).HasColumnName("ma20");
             entity.Property(static item => item.Ma60).HasColumnName("ma60");
@@ -363,6 +495,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TrendScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.VolumePriceScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.FundamentalScorePart).HasPrecision(10, 4);
+            entity.Property(static item => item.RiskDisciplineScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.Close).HasPrecision(18, 4);
             entity.Property(static item => item.Ma20).HasPrecision(18, 4);
             entity.Property(static item => item.Ma60).HasPrecision(18, 4);
@@ -376,6 +509,27 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TargetPrice).HasPrecision(18, 4);
             entity.Property(static item => item.RiskRewardRatio).HasPrecision(10, 4);
             entity.Property(static item => item.Explanation).HasColumnType("longtext");
+        });
+
+        modelBuilder.Entity<StrategyScoreSnapshotEntity>(entity =>
+        {
+            entity.ToTable("strategy_score_snapshots");
+            entity.HasKey(static item => new { item.TradeDate, item.SnapshotVersion, item.StockCode });
+            entity.HasIndex(static item => new { item.TradeDate, item.SnapshotVersion, item.TotalScore });
+            entity.Property(static item => item.TradeDate).HasColumnName("trade_date");
+            entity.Property(static item => item.SnapshotVersion).HasColumnName("snapshot_version").HasMaxLength(32);
+            entity.Property(static item => item.StockCode).HasColumnName("stock_code").HasMaxLength(16);
+            entity.Property(static item => item.StockName).HasColumnName("stock_name").HasMaxLength(64);
+            entity.Property(static item => item.IndustryName).HasColumnName("industry_name").HasMaxLength(64);
+            entity.Property(static item => item.TotalScore).HasColumnName("total_score").HasPrecision(10, 4);
+            entity.Property(static item => item.RelativeStrengthScorePart).HasColumnName("relative_strength_score_part").HasPrecision(10, 4);
+            entity.Property(static item => item.TrendScorePart).HasColumnName("trend_score_part").HasPrecision(10, 4);
+            entity.Property(static item => item.VolumePriceScorePart).HasColumnName("volume_price_score_part").HasPrecision(10, 4);
+            entity.Property(static item => item.FundamentalScorePart).HasColumnName("fundamental_score_part").HasPrecision(10, 4);
+            entity.Property(static item => item.RiskDisciplineScorePart).HasColumnName("risk_discipline_score_part").HasPrecision(10, 4);
+            entity.Property(static item => item.Pe).HasColumnName("pe").HasPrecision(18, 4);
+            entity.Property(static item => item.Pb).HasColumnName("pb").HasPrecision(18, 4);
+            entity.Property(static item => item.Roe).HasColumnName("roe").HasPrecision(18, 4);
         });
 
         modelBuilder.Entity<StrategyTradeSignalEntity>(entity =>
@@ -395,6 +549,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TrendScorePart).HasColumnName("trend_score_part");
             entity.Property(static item => item.VolumePriceScorePart).HasColumnName("volume_price_score_part");
             entity.Property(static item => item.FundamentalScorePart).HasColumnName("fundamental_score_part");
+            entity.Property(static item => item.RiskDisciplineScorePart).HasColumnName("risk_discipline_score_part");
             entity.Property(static item => item.TriggerPrice).HasColumnName("trigger_price");
             entity.Property(static item => item.StopLossPrice).HasColumnName("stop_loss_price");
             entity.Property(static item => item.TargetPrice).HasColumnName("target_price");
@@ -414,6 +569,7 @@ public sealed class StockDecisionDbContext(DbContextOptions<StockDecisionDbConte
             entity.Property(static item => item.TrendScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.VolumePriceScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.FundamentalScorePart).HasPrecision(10, 4);
+            entity.Property(static item => item.RiskDisciplineScorePart).HasPrecision(10, 4);
             entity.Property(static item => item.TriggerPrice).HasPrecision(18, 4);
             entity.Property(static item => item.StopLossPrice).HasPrecision(18, 4);
             entity.Property(static item => item.TargetPrice).HasPrecision(18, 4);

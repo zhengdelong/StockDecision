@@ -197,6 +197,50 @@ class AkshareClient:
         rows = self._to_records(frame)
         return [self._map_financial_report_row(row) for row in rows]
 
+    def fetch_financial_report_snapshots(self, report_date: str) -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if not hasattr(provider, "stock_yjbb_em"):
+            return []
+
+        base_rows = self._to_records(provider.stock_yjbb_em(date=report_date))
+        merged: dict[str, dict[str, Any]] = {}
+        for row in base_rows:
+            stock_code = self._extract_stock_code(row)
+            if not stock_code:
+                continue
+            mapped = self._map_eastmoney_financial_report_row(row, report_date)
+            mapped["stock_code"] = stock_code
+            merged[stock_code] = mapped
+
+        supplemental_interfaces = (
+            ("stock_lrb_em", self._map_eastmoney_profit_report_row),
+            ("stock_zcfz_em", self._map_eastmoney_balance_report_row),
+            ("stock_xjll_em", self._map_eastmoney_cash_flow_report_row),
+        )
+        for interface_name, mapper in supplemental_interfaces:
+            if not hasattr(provider, interface_name):
+                continue
+            try:
+                supplemental_rows = self._to_records(getattr(provider, interface_name)(date=report_date))
+            except Exception:  # noqa: BLE001
+                continue
+            for row in supplemental_rows:
+                stock_code = self._extract_stock_code(row)
+                if not stock_code:
+                    continue
+                target = merged.setdefault(
+                    stock_code,
+                    {
+                        "stock_code": stock_code,
+                        "report_date": report_date,
+                        "data_source_priority": "eastmoney_report",
+                    },
+                )
+                target.update({key: value for key, value in mapper(row, report_date).items() if value not in (None, "")})
+                target["stock_code"] = stock_code
+
+        return list(merged.values())
+
     def fetch_industry_daily_stats(self) -> list[dict[str, Any]]:
         provider = self._get_provider()
         boards = self._to_records(provider.stock_board_industry_name_ths())
@@ -230,6 +274,81 @@ class AkshareClient:
         for index, item in enumerate(ranked, start=1):
             item["rank_20d"] = index
         return ranked
+
+    def fetch_stock_fund_flow(self, stock_code: str, market: str | None = None) -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if not hasattr(provider, "stock_individual_fund_flow"):
+            raise AkshareClientError("AKShare stock_individual_fund_flow is not available.")
+
+        resolved_market = market or self._infer_fund_flow_market(stock_code)
+        rows = self._to_records(provider.stock_individual_fund_flow(stock=stock_code, market=resolved_market))
+        return rows
+
+    def fetch_stock_fund_flow_rank(self, *, indicator: str = "今日") -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if hasattr(provider, "stock_individual_fund_flow_rank"):
+            return self._to_records(provider.stock_individual_fund_flow_rank(indicator=indicator))
+        if indicator == "今日" and hasattr(provider, "stock_main_fund_flow"):
+            return self._to_records(provider.stock_main_fund_flow(symbol="全部股票"))
+
+        raise AkshareClientError("No supported AKShare stock fund flow rank interface is available.")
+
+    def fetch_stock_fund_flow_rank_resilient(self, *, indicator: str = "今日") -> list[dict[str, Any]]:
+        provider = self._get_provider()
+
+        try:
+            return self.fetch_stock_fund_flow_rank(indicator=indicator)
+        except Exception:  # noqa: BLE001
+            pass
+
+        if hasattr(provider, "stock_fund_flow_individual"):
+            symbol_map = {
+                "今日": "即时",
+                "3日": "3日排行",
+                "5日": "5日排行",
+                "10日": "10日排行",
+            }
+            mapped_symbol = symbol_map.get(indicator)
+            if mapped_symbol is not None:
+                return self._to_records(provider.stock_fund_flow_individual(symbol=mapped_symbol))
+
+        raise AkshareClientError("No supported resilient stock fund flow rank interface is available.")
+
+    def fetch_industry_fund_flow(
+        self,
+        *,
+        indicator: str = "\u4eca\u65e5",
+        sector_type: str = "\u884c\u4e1a\u8d44\u91d1\u6d41",
+    ) -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if hasattr(provider, "stock_sector_fund_flow_rank"):
+            try:
+                return self._to_records(provider.stock_sector_fund_flow_rank(indicator=indicator, sector_type=sector_type))
+            except requests.RequestException:
+                pass
+            except ConnectionError:
+                pass
+
+        if hasattr(provider, "stock_fund_flow_industry"):
+            return self._to_records(provider.stock_fund_flow_industry(symbol="即时"))
+
+        raise AkshareClientError("No supported AKShare industry fund flow interface is available.")
+
+    def fetch_lhb_stock_summary(self, trade_date: str) -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if hasattr(provider, "stock_lhb_detail_em"):
+            return self._to_records(provider.stock_lhb_detail_em(start_date=trade_date, end_date=trade_date))
+        if hasattr(provider, "stock_lhb_detail_daily_sina"):
+            return self._to_records(provider.stock_lhb_detail_daily_sina(date=trade_date))
+
+        raise AkshareClientError("No supported AKShare daily LHB summary interface is available.")
+
+    def fetch_lhb_institution_summary(self, trade_date: str) -> list[dict[str, Any]]:
+        provider = self._get_provider()
+        if hasattr(provider, "stock_lhb_jgmmtj_em"):
+            return self._to_records(provider.stock_lhb_jgmmtj_em(start_date=trade_date, end_date=trade_date))
+
+        return []
 
     def _fetch_tencent_stock_spot_snapshot(self) -> list[dict[str, Any]]:
         url = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
@@ -458,6 +577,49 @@ class AkshareClient:
         }
 
     @staticmethod
+    def _map_eastmoney_financial_report_row(row: dict[str, Any], report_date: str) -> dict[str, Any]:
+        return {
+            "stock_code": row.get("stock_code") or row.get("股票代码") or row.get("代码"),
+            "report_date": report_date,
+            "roe": row.get("roe") or row.get("净资产收益率"),
+            "revenue_yoy": row.get("revenue_yoy") or row.get("营业总收入-同比增长"),
+            "net_profit_yoy": row.get("net_profit_yoy") or row.get("净利润-同比增长"),
+            "operating_cash_flow": row.get("operating_cash_flow") or row.get("每股经营现金流量"),
+            "gross_margin": row.get("gross_margin") or row.get("销售毛利率"),
+            "announcement_date": row.get("announcement_date") or row.get("最新公告日期"),
+            "data_source_priority": "eastmoney_report",
+            **row,
+        }
+
+    @staticmethod
+    def _map_eastmoney_profit_report_row(row: dict[str, Any], report_date: str) -> dict[str, Any]:
+        return {
+            "stock_code": row.get("stock_code") or row.get("股票代码") or row.get("代码"),
+            "report_date": report_date,
+            "revenue_yoy": row.get("revenue_yoy") or row.get("营业总收入同比"),
+            "net_profit_yoy": row.get("net_profit_yoy") or row.get("净利润同比"),
+            "announcement_date": row.get("announcement_date") or row.get("公告日期"),
+        }
+
+    @staticmethod
+    def _map_eastmoney_balance_report_row(row: dict[str, Any], report_date: str) -> dict[str, Any]:
+        return {
+            "stock_code": row.get("stock_code") or row.get("股票代码") or row.get("代码"),
+            "report_date": report_date,
+            "debt_to_asset_ratio": row.get("debt_to_asset_ratio") or row.get("资产负债率"),
+            "announcement_date": row.get("announcement_date") or row.get("公告日期"),
+        }
+
+    @staticmethod
+    def _map_eastmoney_cash_flow_report_row(row: dict[str, Any], report_date: str) -> dict[str, Any]:
+        return {
+            "stock_code": row.get("stock_code") or row.get("股票代码") or row.get("代码"),
+            "report_date": report_date,
+            "operating_cash_flow_net": row.get("operating_cash_flow_net") or row.get("经营性现金流-现金流量净额"),
+            "announcement_date": row.get("announcement_date") or row.get("公告日期"),
+        }
+
+    @staticmethod
     def _build_industry_stat_row(
         *,
         board_code: str,
@@ -592,7 +754,14 @@ class AkshareClient:
 
     @staticmethod
     def _extract_stock_code(row: dict[str, Any]) -> str:
-        raw_code = row.get("代码") or row.get("A股代码") or row.get("证券代码") or row.get("stock_code") or row.get("symbol")
+        raw_code = (
+            row.get("代码")
+            or row.get("股票代码")
+            or row.get("A股代码")
+            or row.get("证券代码")
+            or row.get("stock_code")
+            or row.get("symbol")
+        )
         if raw_code in (None, ""):
             return ""
 
@@ -612,3 +781,13 @@ class AkshareClient:
         if stock_code.startswith(("430", "830", "831", "832", "833", "835", "836", "837", "838", "920")):
             return f"bj{stock_code}"
         return stock_code
+
+    @staticmethod
+    def _infer_fund_flow_market(stock_code: str) -> str:
+        if stock_code.startswith(("600", "601", "603", "605", "688")):
+            return "sh"
+        if stock_code.startswith(("000", "001", "002", "003", "300", "301")):
+            return "sz"
+        if stock_code.startswith(("430", "830", "831", "832", "833", "835", "836", "837", "838", "920")):
+            return "bj"
+        return "sh"

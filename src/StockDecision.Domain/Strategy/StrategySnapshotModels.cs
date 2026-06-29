@@ -197,6 +197,24 @@ public sealed record IndicatorSnapshot
 }
 
 /// <summary>
+/// 表示全市场股票在某个交易日的持久化综合得分快照。
+/// </summary>
+public sealed record StrategyScoreSnapshot(
+    DateOnly TradeDate,
+    string StockCode,
+    string StockName,
+    string? IndustryName,
+    decimal TotalScore,
+    decimal RelativeStrengthScorePart,
+    decimal TrendScorePart,
+    decimal VolumePriceScorePart,
+    decimal FundamentalScorePart,
+    decimal? Pe,
+    decimal? Pb,
+    decimal? Roe,
+    decimal RiskDisciplineScorePart = 0m);
+
+/// <summary>
 /// 表示某个交易日的市场环境判断结果。
 /// </summary>
 public sealed record MarketRegimeSnapshot
@@ -270,11 +288,26 @@ public sealed record CandidateScoreBreakdown
         decimal volumePriceScore,
         decimal fundamentalScore,
         IReadOnlyList<ScoreRuleDetail>? details = null)
+        : this(relativeStrengthScore, trendScore, volumePriceScore, fundamentalScore, 0m, details)
+    {
+    }
+
+    /// <summary>
+    /// 初始化包含风险纪律分的评分拆解。
+    /// </summary>
+    public CandidateScoreBreakdown(
+        decimal relativeStrengthScore,
+        decimal trendScore,
+        decimal volumePriceScore,
+        decimal fundamentalScore,
+        decimal riskDisciplineScore,
+        IReadOnlyList<ScoreRuleDetail>? details = null)
     {
         RelativeStrengthScore = relativeStrengthScore;
         TrendScore = trendScore;
         VolumePriceScore = volumePriceScore;
         FundamentalScore = fundamentalScore;
+        RiskDisciplineScore = riskDisciplineScore;
         Details = details ?? [];
     }
 
@@ -299,6 +332,11 @@ public sealed record CandidateScoreBreakdown
     public decimal FundamentalScore { get; init; }
 
     /// <summary>
+    /// 风险纪律维度得分。
+    /// </summary>
+    public decimal RiskDisciplineScore { get; init; }
+
+    /// <summary>
     /// 逐条评分明细。
     /// </summary>
     public IReadOnlyList<ScoreRuleDetail> Details { get; init; }
@@ -306,7 +344,7 @@ public sealed record CandidateScoreBreakdown
     /// <summary>
     /// 综合总分。
     /// </summary>
-    public decimal TotalScore => RelativeStrengthScore + TrendScore + VolumePriceScore + FundamentalScore;
+    public decimal TotalScore => RelativeStrengthScore + TrendScore + VolumePriceScore + FundamentalScore + RiskDisciplineScore;
 }
 
 /// <summary>

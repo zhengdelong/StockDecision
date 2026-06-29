@@ -55,6 +55,14 @@ def test_bootstrap_financial_policy_is_serial_and_slow() -> None:
     assert policy.pause_seconds == 600
 
 
+def test_stock_fund_flow_rank_policy_is_serial_and_conservative() -> None:
+    policy = InterfaceThrottlePolicy.for_interface("stock_individual_fund_flow", mode="incremental")
+
+    assert policy.max_parallelism == 1
+    assert policy.min_delay_seconds == 2.0
+    assert policy.max_delay_seconds == 2.0
+
+
 def test_retry_policy_uses_expected_backoff_schedule() -> None:
     policy = RetryPolicy.default()
 

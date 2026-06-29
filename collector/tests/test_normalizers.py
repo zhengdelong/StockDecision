@@ -28,6 +28,15 @@ def test_parse_decimal_treats_bool_as_missing() -> None:
     assert parse_decimal(False) is None
 
 
+def test_parse_decimal_treats_non_finite_values_as_missing() -> None:
+    from stock_collector.normalizers import parse_decimal
+
+    assert parse_decimal(float("nan")) is None
+    assert parse_decimal(float("inf")) is None
+    assert parse_decimal(Decimal("NaN")) is None
+    assert parse_decimal("Infinity") is None
+
+
 def test_normalize_stock_snapshot_maps_core_fields() -> None:
     audit = AuditContext.create(
         source_name="akshare",
@@ -50,6 +59,27 @@ def test_normalize_stock_snapshot_maps_core_fields() -> None:
     assert row["market"] == "SH"
     assert row["industry_name"] == "银行"
     assert row["raw_payload"]["代码"] == "600000"
+
+
+def test_normalize_stock_snapshot_treats_generic_industry_as_missing() -> None:
+    audit = AuditContext.create(
+        source_name="akshare",
+        interface_name="stock_zh_a_spot",
+        symbol="all",
+        batch_id="b1",
+        is_incremental=True,
+    )
+
+    row = normalize_stock_snapshot(
+        {
+            "代码": "002317",
+            "名称": "众生药业",
+            "所处行业": "C 制造业",
+        },
+        audit,
+    )
+
+    assert row["industry_name"] is None
 
 
 def test_normalize_stock_snapshot_maps_pe_pb() -> None:

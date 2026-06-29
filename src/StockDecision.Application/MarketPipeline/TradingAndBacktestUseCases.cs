@@ -66,6 +66,8 @@ public sealed class GetSimulatedPositionsUseCase(
         var latestTradeDate = latestQuote?.TradeDate;
         var floatingProfitAmount = 0m;
         var floatingProfitPct = 0m;
+        var comparisonDate = latestTradeDate ?? position.ClosedTradeDate ?? position.TradeDate;
+        var heldDays = Math.Max(1, comparisonDate.DayNumber - position.TradeDate.DayNumber + 1);
 
         if (position.Status == "持有中" && latestPrice is decimal currentPrice)
         {
@@ -74,6 +76,23 @@ public sealed class GetSimulatedPositionsUseCase(
                 ? 0m
                 : Math.Round((currentPrice - position.EntryPrice) / position.EntryPrice * 100m, 2, MidpointRounding.AwayFromZero);
         }
+
+        var executionPlan = TradeExecutionPlanFactory.BuildForPosition(
+            position.StrategyType,
+            position.EntryPrice,
+            position.StopLossPrice,
+            position.TargetPrice,
+            position.InvestedCapital,
+            position.Quantity);
+        var advice = PositionAdviceFactory.Build(
+            position.Status,
+            heldDays,
+            latestPrice ?? position.EntryPrice,
+            position.EntryPrice,
+            position.StopLossPrice,
+            position.TargetPrice,
+            floatingProfitPct,
+            executionPlan);
 
         return new SimulatedPositionItemResponse(
             position.Id,
@@ -92,7 +111,13 @@ public sealed class GetSimulatedPositionsUseCase(
             latestTradeDate,
             floatingProfitAmount,
             floatingProfitPct,
+            heldDays,
             position.Status,
+            advice.Status,
+            advice.Title,
+            advice.Text,
+            advice.Tags,
+            executionPlan,
             position.OpenedAtUtc,
             position.ClosedAtUtc,
             position.ExitPrice,
@@ -203,7 +228,13 @@ public sealed class CreateSimulatedBuyUseCase(
             position.TradeDate,
             0m,
             0m,
+            1,
             position.Status,
+            "new",
+            "新开仓，先按计划执行",
+            "买入后先观察是否按预期延续，不要在第一天因为小波动频繁改计划。",
+            ["按计划执行", "观察延续"],
+            TradeExecutionPlanFactory.BuildForPosition(position.StrategyType, position.EntryPrice, position.StopLossPrice, position.TargetPrice, position.InvestedCapital, position.Quantity),
             position.OpenedAtUtc,
             position.ClosedAtUtc,
             position.ExitPrice,
@@ -296,7 +327,13 @@ public sealed class SellSimulatedPositionUseCase(
             tradeDate.Value,
             0m,
             0m,
+            Math.Max(1, tradeDate.Value.DayNumber - closed.TradeDate.DayNumber + 1),
             closed.Status,
+            "closed",
+            "仓位已结束",
+            "这笔模拟仓位已经卖出，后续重点复盘是否按原计划执行。",
+            ["已平仓", "待复盘"],
+            TradeExecutionPlanFactory.BuildForPosition(closed.StrategyType, closed.EntryPrice, closed.StopLossPrice, closed.TargetPrice, closed.InvestedCapital, closed.Quantity),
             closed.OpenedAtUtc,
             closed.ClosedAtUtc,
             closed.ExitPrice,
@@ -306,12 +343,78 @@ public sealed class SellSimulatedPositionUseCase(
     }
 }
 
+internal static class PositionAdviceFactory
+{
+    internal sealed record PositionAdvice(string Status, string Title, string Text, IReadOnlyList<string> Tags);
+
+    internal static PositionAdvice Build(
+        string positionStatus,
+        int heldDays,
+        decimal latestPrice,
+        decimal entryPrice,
+        decimal stopLossPrice,
+        decimal targetPrice,
+        decimal floatingProfitPct,
+        TradeExecutionPlanResponse executionPlan)
+    {
+        if (!string.Equals(positionStatus, "持有中", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PositionAdvice("closed", "仓位已结束", "该仓位已结束，优先复盘是否严格执行了原计划。", ["已结束"]);
+        }
+
+        var distanceToStopPct = latestPrice <= 0m ? 999m : (latestPrice - stopLossPrice) / latestPrice * 100m;
+        var distanceToTargetPct = latestPrice <= 0m ? 999m : (targetPrice - latestPrice) / latestPrice * 100m;
+
+        if (latestPrice <= stopLossPrice || distanceToStopPct <= 1.5m)
+        {
+            return new PositionAdvice(
+                "risk",
+                "接近止损，先执行风控",
+                "当前价格已经非常接近止损位，这时优先减小亏损，而不是期待情绪化反弹。",
+                ["止损优先", "禁止扛单"]);
+        }
+
+        if (latestPrice >= targetPrice || distanceToTargetPct <= 2m)
+        {
+            return new PositionAdvice(
+                "take_profit",
+                "接近目标位，准备兑现",
+                "价格已接近目标区，优先考虑分批止盈，把纸面利润落袋，而不是临时上调预期。",
+                ["分批止盈", "保护利润"]);
+        }
+
+        if (heldDays >= executionPlan.MaxHoldingDays)
+        {
+            return new PositionAdvice(
+                "timeout",
+                "超过持仓上限，按计划退出",
+                $"这笔仓位已持有 {heldDays} 天，超过计划上限 {executionPlan.MaxHoldingDays} 天，趋势若仍未明显扩散，应按纪律退出。",
+                ["时间止损", "纪律退出"]);
+        }
+
+        if (floatingProfitPct >= 5m)
+        {
+            return new PositionAdvice(
+                "profit",
+                "浮盈中，观察趋势延续",
+                "仓位已有较明显浮盈，先观察是否继续沿着原计划运行，不要因为短线噪音过早清仓。",
+                ["浮盈跟踪", "避免乱动"]);
+        }
+
+        return new PositionAdvice(
+            "hold",
+            "仍在计划内，继续观察",
+            "当前位置还在计划容忍区间内，核心是继续跟踪是否站稳关键价位，并严格保留止损纪律。",
+            ["计划内", "继续观察"]);
+    }
+}
+
 /// <summary>
 /// 执行并保存回测结果。
 /// </summary>
 public sealed class RunBacktestUseCase(IMarketDataRepository marketRepository, IBacktestRunRepository backtestRunRepository)
 {
-    private const string StrategyVersion = "a-share-20k-v1";
+    private const string StrategyVersion = "a-share-20k-v2";
     private const decimal InitialAccountCapital = 20_000m;
     private const decimal PreferredPositionCapital = 10_000m;
     private const decimal MinimumPositionCapital = 6_000m;

@@ -14,7 +14,7 @@ public sealed class SystemController(GetSystemSummaryUseCase getSystemSummaryUse
         {
             service = "StockDecision.Api",
             status = "正常",
-            strategy = "a-share-20k-v1"
+            strategy = "a-share-20k-v2"
         });
     }
 

@@ -22,7 +22,8 @@ public sealed record StockProfile
         decimal? freeFloatMarketCap,
         decimal? turnoverRate,
         decimal? averageAmount20d,
-        DateOnly snapshotDate)
+        DateOnly snapshotDate,
+        string? scoringIndustryName = null)
     {
         StockCode = stockCode;
         StockName = stockName;
@@ -38,6 +39,7 @@ public sealed record StockProfile
         TurnoverRate = turnoverRate;
         AverageAmount20d = averageAmount20d;
         SnapshotDate = snapshotDate;
+        ScoringIndustryName = string.IsNullOrWhiteSpace(scoringIndustryName) ? null : scoringIndustryName.Trim();
     }
 
     /// <summary>
@@ -54,6 +56,16 @@ public sealed record StockProfile
     /// 所属行业名称。
     /// </summary>
     public string? IndustryName { get; init; }
+
+    /// <summary>
+    /// 用于匹配行业强度和行业资金流的评分行业名称。
+    /// </summary>
+    public string? ScoringIndustryName { get; init; }
+
+    /// <summary>
+    /// 优先使用评分行业；未能映射时回退到展示行业。
+    /// </summary>
+    public string? EffectiveScoringIndustryName => string.IsNullOrWhiteSpace(ScoringIndustryName) ? IndustryName : ScoringIndustryName;
 
     /// <summary>
     /// 是否处于可交易状态。
@@ -195,6 +207,34 @@ public sealed record DailyBar
 }
 
 /// <summary>
+/// 表示列表打分所需的轻量历史量价指标。
+/// </summary>
+public sealed record StockScoringHistoryMetrics(
+    string StockCode,
+    decimal Return10d,
+    decimal AmountRatio1d,
+    decimal Ma60Previous);
+
+/// <summary>
+/// 表示生成策略指标所需的单股历史聚合结果。
+/// </summary>
+public sealed record IndicatorCalculationMetrics(
+    string StockCode,
+    decimal Close,
+    decimal Ma20,
+    decimal Ma60,
+    decimal Ma120,
+    decimal Atr14,
+    decimal Return20d,
+    decimal Return60d,
+    decimal Return10d,
+    decimal AmountRatio1d,
+    decimal PreviousMa20,
+    decimal Ma60Previous,
+    decimal BreakoutClose,
+    decimal? TurnoverRate);
+
+/// <summary>
 /// 表示市场指数的单日收盘快照。
 /// </summary>
 public sealed record MarketIndexBar
@@ -295,7 +335,13 @@ public sealed record FinancialSnapshot
         decimal? roe,
         decimal? revenueYoy,
         decimal? netProfitYoy,
-        decimal? freeFloatMarketCap)
+        decimal? freeFloatMarketCap,
+        decimal? operatingCashFlow = null,
+        decimal? grossMargin = null,
+        decimal? debtToAssetRatio = null,
+        decimal? operatingCashFlowNet = null,
+        DateOnly? announcementDate = null,
+        string? dataSourcePriority = null)
     {
         StockCode = stockCode;
         ReportDate = reportDate;
@@ -305,6 +351,12 @@ public sealed record FinancialSnapshot
         RevenueYoy = revenueYoy;
         NetProfitYoy = netProfitYoy;
         FreeFloatMarketCap = freeFloatMarketCap;
+        OperatingCashFlow = operatingCashFlow;
+        GrossMargin = grossMargin;
+        DebtToAssetRatio = debtToAssetRatio;
+        OperatingCashFlowNet = operatingCashFlowNet;
+        AnnouncementDate = announcementDate;
+        DataSourcePriority = dataSourcePriority;
     }
 
     /// <summary>
@@ -346,4 +398,65 @@ public sealed record FinancialSnapshot
     /// 流通市值。
     /// </summary>
     public decimal? FreeFloatMarketCap { get; init; }
+
+    public decimal? OperatingCashFlow { get; init; }
+
+    public decimal? GrossMargin { get; init; }
+
+    public decimal? DebtToAssetRatio { get; init; }
+
+    public decimal? OperatingCashFlowNet { get; init; }
+
+    public DateOnly? AnnouncementDate { get; init; }
+
+    public string? DataSourcePriority { get; init; }
 }
+
+/// <summary>
+/// 表示个股资金流快照。
+/// </summary>
+public sealed record StockFundFlowSnapshot(
+    string StockCode,
+    DateOnly TradeDate,
+    decimal? MainNetAmount,
+    decimal? MainNetPct,
+    decimal? SuperLargeNetAmount,
+    decimal? SuperLargeNetPct,
+    decimal? LargeNetAmount,
+    decimal? LargeNetPct,
+    decimal? MediumNetAmount,
+    decimal? MediumNetPct,
+    decimal? SmallNetAmount,
+    decimal? SmallNetPct,
+    decimal? RankPercentile5d);
+
+/// <summary>
+/// 表示行业资金流快照。
+/// </summary>
+public sealed record IndustryFundFlowSnapshot(
+    string IndustryName,
+    DateOnly TradeDate,
+    decimal? MainNetAmount,
+    decimal? MainNetPct,
+    int? Rank,
+    decimal? RankPercentile);
+
+/// <summary>
+/// 表示龙虎榜汇总快照。
+/// </summary>
+public sealed record LhbSnapshot(
+    string StockCode,
+    DateOnly TradeDate,
+    string? Reason,
+    decimal? BuyTop5Amount,
+    decimal? SellTop5Amount,
+    decimal? NetAmount,
+    decimal? InstitutionBuyAmount,
+    decimal? InstitutionSellAmount,
+    decimal? InstitutionNetAmount,
+    int? InstitutionBuyCount,
+    bool IsInstitutionNetBuy,
+    bool IsOnLhbToday,
+    int Recent20dLhbCount,
+    int? DaysSinceLastLhb,
+    string? RiskFlags);

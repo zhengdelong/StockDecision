@@ -85,6 +85,16 @@ class InterfaceThrottlePolicy:
                 cooldown_after_batch_seconds=0,
             )
 
+        if interface_name == "stock_individual_fund_flow":
+            return cls(
+                interface_name=interface_name,
+                max_parallelism=1,
+                min_delay_seconds=2.0,
+                max_delay_seconds=2.0,
+                batch_size=1,
+                cooldown_after_batch_seconds=0,
+            )
+
         return cls(
             interface_name=interface_name,
             max_parallelism=1,
