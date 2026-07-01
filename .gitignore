@@ -13,3 +13,7 @@ collector/stock_collector.egg-info/
 *.suo
 .idea/
 tmp/
+tmp_*.png
+screenshots/
+test-results/
+playwright-report/
