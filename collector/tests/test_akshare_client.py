@@ -43,6 +43,41 @@ class HistFallbackProvider:
         return [{"日期": "2026-06-22", "收盘": "10.2"}]
 
 
+class HistEmptyTencentFallbackProvider:
+    def __init__(self) -> None:
+        self.called: list[str] = []
+
+    def stock_zh_a_hist(self, symbol: str, period: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("hist")
+        return []
+
+    def stock_zh_a_hist_tx(self, symbol: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("tx")
+        assert symbol == "sh600000"
+        return [{"date": "2026-06-23", "open": "10", "high": "10.5", "low": "9.8", "close": "10.2", "amount": "123"}]
+
+    def stock_zh_a_daily(self, symbol: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("daily")
+        return [{"日期": "2026-06-22", "收盘": "10.1"}]
+
+
+class TencentEmptyDailyFallbackProvider:
+    def __init__(self) -> None:
+        self.called: list[str] = []
+
+    def stock_zh_a_hist(self, symbol: str, period: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("hist")
+        return []
+
+    def stock_zh_a_hist_tx(self, symbol: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("tx")
+        return [{"date": "2026-06-22", "close": "10.1"}]
+
+    def stock_zh_a_daily(self, symbol: str, start_date: str, end_date: str, adjust: str):
+        self.called.append("daily")
+        return [{"日期": "2026-06-23", "收盘": "10.2"}]
+
+
 class DataFrameLikePayload:
     def to_dict(self, *, orient: str) -> list[dict[str, str]]:
         assert orient == "records"
@@ -395,6 +430,34 @@ def test_fetch_daily_bars_falls_back_to_daily_when_hist_fails() -> None:
 
     assert rows[0]["trade_date"] == "2026-06-22"
     assert provider.called == ["hist", "daily"]
+
+
+def test_fetch_daily_bars_falls_back_to_tencent_when_hist_is_empty() -> None:
+    provider = HistEmptyTencentFallbackProvider()
+    client = AkshareClient(provider=provider)
+
+    rows = client.fetch_daily_bars("600000", "20260623", "20260623")
+
+    assert rows[0]["trade_date"] == "2026-06-23"
+    assert rows[0]["close"] == "10.2"
+    assert rows[0]["volume"] == "123"
+    assert rows[0]["amount"] is None
+    assert provider.called == ["hist", "tx"]
+
+
+def test_fetch_daily_bars_falls_back_to_daily_when_tencent_has_no_target_date() -> None:
+    provider = TencentEmptyDailyFallbackProvider()
+    client = AkshareClient(provider=provider)
+
+    rows = client.fetch_daily_bars("600000", "20260623", "20260623")
+
+    assert rows[0]["trade_date"] == "2026-06-23"
+    assert provider.called == ["hist", "tx", "daily"]
+
+
+def test_to_market_symbol_supports_new_a_share_prefixes() -> None:
+    assert AkshareClient._to_market_symbol("302132") == "sz302132"  # noqa: SLF001
+    assert AkshareClient._to_market_symbol("689009") == "sh689009"  # noqa: SLF001
 
 
 def test_fetch_financial_snapshots_falls_back_to_sina() -> None:

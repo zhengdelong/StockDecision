@@ -140,10 +140,31 @@ class AkshareClient:
                 )
                 rows = self._to_records(frame)
                 filtered_rows = self._filter_rows_by_date(rows, start_date=start_date, end_date=end_date)
-                return [self._map_daily_bar_row(row) for row in filtered_rows]
+                if filtered_rows:
+                    return [self._map_daily_bar_row(row) for row in filtered_rows]
+                if rows:
+                    return []
             except Exception:  # noqa: BLE001
                 # 历史日线主接口失败时再退回旧接口，避免在高频补拉场景里无限重试多套源。
                 pass
+
+        if hasattr(provider, "stock_zh_a_hist_tx"):
+            try:
+                frame = provider.stock_zh_a_hist_tx(
+                    symbol=self._to_market_symbol(stock_code),
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust=adjust,
+                )
+                rows = self._to_records(frame)
+                filtered_rows = self._filter_rows_by_date(rows, start_date=start_date, end_date=end_date)
+                if filtered_rows:
+                    return [self._map_tencent_daily_bar_row(row) for row in filtered_rows]
+            except Exception:  # noqa: BLE001
+                pass
+
+        if not hasattr(provider, "stock_zh_a_daily"):
+            return []
 
         try:
             frame = provider.stock_zh_a_daily(
@@ -555,6 +576,20 @@ class AkshareClient:
         }
 
     @staticmethod
+    def _map_tencent_daily_bar_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **row,
+            "trade_date": row.get("trade_date") or row.get("date"),
+            "open": row.get("open"),
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "close": row.get("close"),
+            "volume": row.get("volume") or row.get("amount"),
+            "amount": row.get("turnover_amount"),
+            "turnover_rate": row.get("turnover_rate") or row.get("turnover"),
+        }
+
+    @staticmethod
     def _map_financial_snapshot_row(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "report_date": row.get("report_date") or row.get("报告期"),
@@ -772,9 +807,9 @@ class AkshareClient:
 
     @staticmethod
     def _to_market_symbol(stock_code: str) -> str:
-        if stock_code.startswith(("600", "601", "603", "605", "688")):
+        if stock_code.startswith(("600", "601", "603", "605", "688", "689")):
             return f"sh{stock_code}"
-        if stock_code.startswith(("000", "001", "002", "003", "300", "301")):
+        if stock_code.startswith(("000", "001", "002", "003", "300", "301", "302")):
             return f"sz{stock_code}"
         if stock_code.lower().startswith("bj"):
             return stock_code.lower()
