@@ -9,7 +9,9 @@ import type {
   DomainSyncRunItem,
   FinancialItem,
   FinancialQuery,
+  FundFlowQuery,
   IndustryItem,
+  IndustryFundFlowItem,
   IndustryQuery,
   LearningReviewOverviewResponse,
   PagedResponse,
@@ -21,6 +23,7 @@ import type {
   SimulatedPositionItem,
   SimulatedTradeHistoryItem,
   SnapshotVersion,
+  StockFundFlowItem,
   StockDetailResponse,
   StrategyExplanationResponse,
   SystemHealthResponse,
@@ -82,6 +85,14 @@ export function fetchSignals(query: SignalQuery = {}): Promise<PagedResponse<Sig
 
 export function fetchIndustries(query: IndustryQuery = {}): Promise<PagedResponse<IndustryItem>> {
   return getJson<PagedResponse<IndustryItem>>(`/api/industries${buildQuery(query)}`)
+}
+
+export function fetchStockFundFlows(query: FundFlowQuery = {}): Promise<PagedResponse<StockFundFlowItem>> {
+  return getJson<PagedResponse<StockFundFlowItem>>(`/api/fund-flows/stocks${buildQuery(query)}`)
+}
+
+export function fetchIndustryFundFlows(query: FundFlowQuery = {}): Promise<PagedResponse<IndustryFundFlowItem>> {
+  return getJson<PagedResponse<IndustryFundFlowItem>>(`/api/fund-flows/industries${buildQuery(query)}`)
 }
 
 export function fetchFinancials(query: FinancialQuery = {}): Promise<PagedResponse<FinancialItem>> {

@@ -5,6 +5,7 @@ export type ViewMode =
   | 'signals'
   | 'positions'
   | 'industries'
+  | 'fundFlows'
   | 'financials'
   | 'strategy'
   | 'learning'
@@ -48,6 +49,7 @@ const menuGroups: MenuGroup[] = [
     title: '分析',
     items: [
       { key: 'industries', title: '行业强度', caption: '比较行业热度和信号密度' },
+      { key: 'fundFlows', title: '资金流向', caption: '查看行业和个股资金榜' },
       { key: 'financials', title: '全市场评分', caption: '查看所有股票的综合打分' },
       { key: 'strategy', title: '策略解释', caption: '用中文拆解评分和规则' },
       { key: 'learning', title: '学习复盘', caption: '沉淀交易经验' },

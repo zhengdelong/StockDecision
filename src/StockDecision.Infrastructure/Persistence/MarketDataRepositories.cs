@@ -1545,12 +1545,23 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
     /// </summary>
     public async Task<IReadOnlyList<IndustryDailyStat>> GetIndustryStatsAsync(DateOnly tradeDate, CancellationToken cancellationToken)
     {
-        return await dbContext.MarketIndustryDailyStats
+        var rows = await dbContext.MarketIndustryDailyStats
+            .AsNoTracking()
             .Where(item => item.TradeDate == tradeDate)
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(item => item.IndustryName)
+            .Select(static group => group
+                .OrderBy(item => item.Rank20d ?? int.MaxValue)
+                .ThenByDescending(item => item.PctChange20d ?? decimal.MinValue)
+                .ThenBy(item => item.IndustryCode)
+                .First())
             .OrderBy(item => item.Rank20d ?? int.MaxValue)
+            .ThenByDescending(item => item.PctChange20d ?? decimal.MinValue)
             .ThenBy(item => item.IndustryName)
             .Select(static item => new IndustryDailyStat(item.IndustryCode, item.IndustryName, item.TradeDate, item.PctChange20d, item.Rank20d))
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
     /// <summary>
@@ -1912,6 +1923,200 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
         return new PagedResponse<FinancialListItemResponse>(items, page, pageSize, totalCount);
     }
 
+    public async Task<PagedResponse<StockFundFlowListItemResponse>> GetStockFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+    {
+        var snapshotVersionValue = snapshotVersion.ToValue();
+        var page = Math.Max(1, query.Page);
+        var pageSize = Math.Clamp(query.PageSize, 1, 100);
+        var search = query.Search?.Trim();
+        var direction = (query.Direction ?? "all").Trim().ToLowerInvariant();
+        var where = new List<string>
+        {
+            "f.trade_date = @tradeDate"
+        };
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            where.Add("(f.stock_code LIKE @search OR p.stock_name LIKE @search OR p.industry_name LIKE @search)");
+        }
+
+        if (direction == "inflow")
+        {
+            where.Add("COALESCE(f.main_net_amount, 0) > 0");
+        }
+        else if (direction == "outflow")
+        {
+            where.Add("COALESCE(f.main_net_amount, 0) < 0");
+        }
+
+        var whereSql = string.Join(" AND ", where);
+        var orderSql = ResolveStockFundFlowOrderSql(query.SortBy, direction);
+        var countSql = $"""
+            SELECT COUNT(*) AS Value
+            FROM market_stock_fund_flows AS f
+            LEFT JOIN market_stock_profiles AS p
+                ON p.stock_code = f.stock_code
+               AND p.trade_date = f.trade_date
+            WHERE {whereSql}
+            """;
+        var totalCount = await dbContext.Database
+            .SqlQueryRaw<int>(
+                countSql,
+                BuildFundFlowPageParameters(tradeDate, snapshotVersionValue, search, null, null))
+            .SingleAsync(cancellationToken);
+
+        var dataSql = $"""
+            SELECT
+                f.stock_code AS StockCode,
+                COALESCE(p.stock_name, s.stock_name, c.stock_name, f.stock_code) AS StockName,
+                COALESCE(p.industry_name, s.industry_name, c.industry_name) AS IndustryName,
+                f.trade_date AS TradeDate,
+                f.main_net_amount AS MainNetAmount,
+                f.main_net_pct AS MainNetPct,
+                f.super_large_net_amount AS SuperLargeNetAmount,
+                f.super_large_net_pct AS SuperLargeNetPct,
+                f.rank_percentile_5d AS RankPercentile5d,
+                s.total_score AS TotalScore,
+                c.eligibility_status AS EligibilityStatus,
+                c.stock_code IS NOT NULL AS IsCandidate,
+                COALESCE(c.is_tradable, 0) AS IsTradable
+            FROM market_stock_fund_flows AS f
+            LEFT JOIN market_stock_profiles AS p
+                ON p.stock_code = f.stock_code
+               AND p.trade_date = f.trade_date
+            LEFT JOIN strategy_score_snapshots AS s
+                ON s.stock_code = f.stock_code
+               AND s.trade_date = f.trade_date
+               AND s.snapshot_version = @snapshotVersion
+            LEFT JOIN strategy_candidates AS c
+                ON c.stock_code = f.stock_code
+               AND c.trade_date = f.trade_date
+               AND c.snapshot_version = @snapshotVersion
+            WHERE {whereSql}
+            ORDER BY {orderSql}, f.stock_code
+            LIMIT @take OFFSET @skip
+            """;
+        var rows = await dbContext.Database
+            .SqlQueryRaw<StockFundFlowPageRow>(
+                dataSql,
+                BuildFundFlowPageParameters(tradeDate, snapshotVersionValue, search, (page - 1) * pageSize, pageSize))
+            .ToListAsync(cancellationToken);
+        var items = rows
+            .Select(static item => new StockFundFlowListItemResponse(
+                item.StockCode,
+                item.StockName,
+                item.IndustryName,
+                item.TradeDate,
+                item.MainNetAmount,
+                item.MainNetPct,
+                item.SuperLargeNetAmount,
+                item.SuperLargeNetPct,
+                item.RankPercentile5d,
+                item.TotalScore,
+                item.EligibilityStatus,
+                item.IsCandidate,
+                item.IsTradable))
+            .ToList();
+
+        return new PagedResponse<StockFundFlowListItemResponse>(items, page, pageSize, totalCount);
+    }
+
+    public async Task<PagedResponse<IndustryFundFlowListItemResponse>> GetIndustryFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+    {
+        var snapshotVersionValue = snapshotVersion.ToValue();
+        var page = Math.Max(1, query.Page);
+        var pageSize = Math.Clamp(query.PageSize, 1, 100);
+        var search = query.Search?.Trim();
+        var direction = (query.Direction ?? "all").Trim().ToLowerInvariant();
+        var where = new List<string>
+        {
+            "f.trade_date = @tradeDate"
+        };
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            where.Add("f.industry_name LIKE @search");
+        }
+
+        if (direction == "inflow")
+        {
+            where.Add("COALESCE(f.main_net_amount, 0) > 0");
+        }
+        else if (direction == "outflow")
+        {
+            where.Add("COALESCE(f.main_net_amount, 0) < 0");
+        }
+
+        var whereSql = string.Join(" AND ", where);
+        var orderSql = ResolveIndustryFundFlowOrderSql(query.SortBy, direction);
+        var countSql = $"""
+            SELECT COUNT(*) AS Value
+            FROM market_industry_fund_flows AS f
+            WHERE {whereSql}
+            """;
+        var totalCount = await dbContext.Database
+            .SqlQueryRaw<int>(
+                countSql,
+                BuildFundFlowPageParameters(tradeDate, snapshotVersionValue, search, null, null))
+            .SingleAsync(cancellationToken);
+
+        var dataSql = $"""
+            SELECT
+                f.industry_name AS IndustryName,
+                f.trade_date AS TradeDate,
+                f.main_net_amount AS MainNetAmount,
+                f.main_net_pct AS MainNetPct,
+                f.`rank` AS IndustryRank,
+                f.rank_percentile AS RankPercentile,
+                COALESCE(c.candidate_count, 0) AS CandidateCount,
+                COALESCE(ts.signal_count, 0) AS SignalCount,
+                c.top_candidate_score AS TopCandidateScore,
+                ts.top_signal_score AS TopSignalScore
+            FROM market_industry_fund_flows AS f
+            LEFT JOIN (
+                SELECT industry_name, COUNT(*) AS candidate_count, MAX(total_score) AS top_candidate_score
+                FROM strategy_candidates
+                WHERE trade_date = @tradeDate
+                  AND snapshot_version = @snapshotVersion
+                  AND industry_name IS NOT NULL
+                GROUP BY industry_name
+            ) AS c
+                ON c.industry_name = f.industry_name
+            LEFT JOIN (
+                SELECT industry_name, COUNT(*) AS signal_count, MAX(total_score) AS top_signal_score
+                FROM strategy_trade_signals
+                WHERE trade_date = @tradeDate
+                  AND snapshot_version = @snapshotVersion
+                  AND industry_name IS NOT NULL
+                GROUP BY industry_name
+            ) AS ts
+                ON ts.industry_name = f.industry_name
+            WHERE {whereSql}
+            ORDER BY {orderSql}, f.industry_name
+            LIMIT @take OFFSET @skip
+            """;
+        var rows = await dbContext.Database
+            .SqlQueryRaw<IndustryFundFlowPageRow>(
+                dataSql,
+                BuildFundFlowPageParameters(tradeDate, snapshotVersionValue, search, (page - 1) * pageSize, pageSize))
+            .ToListAsync(cancellationToken);
+        var items = rows
+            .Select(static item => new IndustryFundFlowListItemResponse(
+                item.IndustryName,
+                item.TradeDate,
+                item.MainNetAmount,
+                item.MainNetPct,
+                item.IndustryRank,
+                item.RankPercentile,
+                item.CandidateCount,
+                item.SignalCount,
+                item.TopCandidateScore,
+                item.TopSignalScore))
+            .ToList();
+
+        return new PagedResponse<IndustryFundFlowListItemResponse>(items, page, pageSize, totalCount);
+    }
+
     public async Task<MarketRegimeSnapshot?> GetMarketRegimeAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken)
     {
         var snapshotVersionValue = snapshotVersion.ToValue();
@@ -2128,6 +2333,57 @@ public sealed class EfMarketDataRepository(StockDecisionDbContext dbContext) : I
 
         return parameters.ToArray();
     }
+
+    private static object[] BuildFundFlowPageParameters(DateOnly tradeDate, string snapshotVersion, string? search, int? skip, int? take)
+    {
+        var parameters = new List<object>
+        {
+            new MySqlParameter("@tradeDate", tradeDate),
+            new MySqlParameter("@snapshotVersion", snapshotVersion)
+        };
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            parameters.Add(new MySqlParameter("@search", $"%{search}%"));
+        }
+
+        if (skip is not null)
+        {
+            parameters.Add(new MySqlParameter("@skip", skip.Value));
+        }
+
+        if (take is not null)
+        {
+            parameters.Add(new MySqlParameter("@take", take.Value));
+        }
+
+        return parameters.ToArray();
+    }
+
+    private static string ResolveStockFundFlowOrderSql(string? sortBy, string direction)
+    {
+        var isOutflow = direction == "outflow";
+        return (sortBy ?? "percentile").ToLowerInvariant() switch
+        {
+            "main" => isOutflow ? "f.main_net_amount ASC" : "f.main_net_amount DESC",
+            "mainpct" => isOutflow ? "f.main_net_pct ASC" : "f.main_net_pct DESC",
+            "superlargepct" => isOutflow ? "f.super_large_net_pct ASC" : "f.super_large_net_pct DESC",
+            "score" => "s.total_score DESC",
+            _ => "f.rank_percentile_5d DESC"
+        };
+    }
+
+    private static string ResolveIndustryFundFlowOrderSql(string? sortBy, string direction)
+    {
+        var isOutflow = direction == "outflow";
+        return (sortBy ?? "rank").ToLowerInvariant() switch
+        {
+            "percentile" => "f.rank_percentile DESC",
+            "main" => isOutflow ? "f.main_net_amount ASC" : "f.main_net_amount DESC",
+            "candidates" => "COALESCE(c.candidate_count, 0) DESC",
+            "signals" => "COALESCE(ts.signal_count, 0) DESC",
+            _ => "f.`rank` ASC"
+        };
+    }
 }
 
 /// <summary>
@@ -2211,6 +2467,37 @@ internal sealed class FinancialScorePageRow
     public decimal? OperatingCashFlowNet { get; set; }
     public DateOnly? AnnouncementDate { get; set; }
     public string? DataSourcePriority { get; set; }
+}
+
+internal sealed class StockFundFlowPageRow
+{
+    public string StockCode { get; set; } = string.Empty;
+    public string StockName { get; set; } = string.Empty;
+    public string? IndustryName { get; set; }
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public decimal? SuperLargeNetAmount { get; set; }
+    public decimal? SuperLargeNetPct { get; set; }
+    public decimal? RankPercentile5d { get; set; }
+    public decimal? TotalScore { get; set; }
+    public string? EligibilityStatus { get; set; }
+    public bool IsCandidate { get; set; }
+    public bool IsTradable { get; set; }
+}
+
+internal sealed class IndustryFundFlowPageRow
+{
+    public string IndustryName { get; set; } = string.Empty;
+    public DateOnly TradeDate { get; set; }
+    public decimal? MainNetAmount { get; set; }
+    public decimal? MainNetPct { get; set; }
+    public int? IndustryRank { get; set; }
+    public decimal? RankPercentile { get; set; }
+    public int CandidateCount { get; set; }
+    public int SignalCount { get; set; }
+    public decimal? TopCandidateScore { get; set; }
+    public decimal? TopSignalScore { get; set; }
 }
 
 public sealed class EfDomainSyncRunRepository(StockDecisionDbContext dbContext) : IDomainSyncRunRepository

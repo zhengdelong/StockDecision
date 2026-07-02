@@ -5,6 +5,7 @@ import BacktestView from './components/BacktestView.vue'
 import CandidatesView from './components/CandidatesView.vue'
 import DashboardView from './components/DashboardView.vue'
 import FinancialView from './components/FinancialView.vue'
+import FundFlowView from './components/FundFlowView.vue'
 import IndustryView from './components/IndustryView.vue'
 import LearningView from './components/LearningView.vue'
 import OverviewCards from './components/OverviewCards.vue'
@@ -29,6 +30,7 @@ const currentViewTitle = computed(() => {
     case 'signals': return '交易信号清单'
     case 'positions': return '模拟交易与持仓'
     case 'industries': return '行业强度看板'
+    case 'fundFlows': return '资金流向'
     case 'financials': return '全市场股票评分'
     case 'strategy': return '策略解释'
     case 'learning': return '学习复盘'
@@ -45,6 +47,7 @@ const currentViewSummary = computed(() => {
     case 'signals': return '聚焦可执行信号、建议仓位和风控价位，便于当天复核。'
     case 'positions': return '先做模拟买卖，再跟踪盈亏、止损止盈和历史流水。'
     case 'industries': return '横向比较行业热度、候选分布和信号集中度。'
+    case 'fundFlows': return '跟踪行业和个股主力资金流向，识别资金异动与候选池交叉机会。'
     case 'financials': return '查看全市场可评分股票的综合打分，并结合 PE、PB、ROE 和增长指标做横向比较。'
     case 'strategy': return '把评分逻辑、环境过滤和执行规则拆开讲清楚，便于学习。'
     case 'learning': return '把每次交易记录成复盘素材，沉淀成以后可重复使用的规则。'
@@ -55,10 +58,10 @@ const currentViewSummary = computed(() => {
   }
 })
 
-const overviewHiddenViews = ['system', 'tasks', 'financials', 'strategy', 'learning', 'backtests', 'positions']
+const overviewHiddenViews = ['system', 'tasks', 'financials', 'strategy', 'learning', 'backtests', 'positions', 'fundFlows']
 const showsOverviewCards = computed(() => !overviewHiddenViews.includes(activeView.value))
-const showsDetailPanel = computed(() => ['dashboard', 'candidates', 'signals', 'financials', 'learning'].includes(activeView.value))
-const usesDetailDrawer = computed(() => ['candidates', 'signals', 'financials'].includes(activeView.value))
+const showsDetailPanel = computed(() => ['dashboard', 'candidates', 'signals', 'financials', 'learning', 'fundFlows'].includes(activeView.value))
+const usesDetailDrawer = computed(() => ['candidates', 'signals', 'financials', 'fundFlows'].includes(activeView.value))
 const showsDockedDetailPanel = computed(() => showsDetailPanel.value && !usesDetailDrawer.value)
 const showsDetailDrawer = computed(() => showsDetailPanel.value && usesDetailDrawer.value)
 const isDetailDrawerOpen = ref(false)
@@ -97,7 +100,7 @@ function closeDetailDrawer() {
 }
 
 watch(activeView, (view) => {
-  if (!['candidates', 'signals', 'financials'].includes(view)) {
+  if (!['candidates', 'signals', 'financials', 'fundFlows'].includes(view)) {
     isDetailDrawerOpen.value = false
   }
 })
@@ -256,6 +259,35 @@ watch(
               @update:search-text="desk.searchText.value = $event"
               @update:selected-trade-date="desk.selectedTradeDate.value = $event"
               @update:sort-mode="desk.industrySortMode.value = $event"
+            />
+
+            <FundFlowView
+              v-else-if="activeView === 'fundFlows'"
+              :direction="desk.fundFlowDirection.value"
+              :industry-fund-flow-page-index="desk.industryFundFlowPageIndex.value"
+              :industry-fund-flows="desk.industryFundFlows.value"
+              :industry-sort-mode="desk.industryFundFlowSortMode.value"
+              :industry-total-count="desk.industryFundFlowTotalCount.value"
+              :industry-total-pages="desk.totalIndustryFundFlowPages.value"
+              :is-loading="desk.isLoading.value"
+              :search-text="desk.searchText.value"
+              :selected-stock-code="selectedStockCode"
+              :selected-trade-date="desk.selectedTradeDate.value"
+              :stock-fund-flow-page-index="desk.stockFundFlowPageIndex.value"
+              :stock-fund-flows="desk.stockFundFlows.value"
+              :stock-sort-mode="desk.stockFundFlowSortMode.value"
+              :stock-total-count="desk.stockFundFlowTotalCount.value"
+              :stock-total-pages="desk.totalStockFundFlowPages.value"
+              @apply="desk.applyFilters"
+              @move-industry-page="desk.moveIndustryFundFlowPage"
+              @move-stock-page="desk.moveStockFundFlowPage"
+              @reset-date="desk.resetTradeDate"
+              @select-stock="handleSelectStock"
+              @update:direction="desk.fundFlowDirection.value = $event"
+              @update:industry-sort-mode="desk.industryFundFlowSortMode.value = $event"
+              @update:search-text="desk.searchText.value = $event"
+              @update:selected-trade-date="desk.selectedTradeDate.value = $event"
+              @update:stock-sort-mode="desk.stockFundFlowSortMode.value = $event"
             />
 
             <FinancialView

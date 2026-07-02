@@ -50,6 +50,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<GetCandidatesUseCase>();
         services.AddScoped<GetTodaySignalsUseCase>();
         services.AddScoped<GetIndustriesUseCase>();
+        services.AddScoped<GetStockFundFlowsUseCase>();
+        services.AddScoped<GetIndustryFundFlowsUseCase>();
         services.AddScoped<GetFinancialsUseCase>();
         services.AddScoped<GetStrategyExplanationUseCase>();
         services.AddScoped<GetBacktestOverviewUseCase>();

@@ -242,6 +242,12 @@ public class DomainSyncUseCasesTests
         public Task<PagedResponse<FinancialListItemResponse>> GetFinancialScorePageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FinancialListQuery query, CancellationToken cancellationToken)
             => Task.FromResult(new PagedResponse<FinancialListItemResponse>([], 1, query.PageSize, 0));
 
+        public Task<PagedResponse<StockFundFlowListItemResponse>> GetStockFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+            => Task.FromResult(new PagedResponse<StockFundFlowListItemResponse>([], 1, query.PageSize, 0));
+
+        public Task<PagedResponse<IndustryFundFlowListItemResponse>> GetIndustryFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+            => Task.FromResult(new PagedResponse<IndustryFundFlowListItemResponse>([], 1, query.PageSize, 0));
+
         public Task<IReadOnlyList<IndicatorSnapshot>> GetIndicatorSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<IndicatorSnapshot>>([]);
 

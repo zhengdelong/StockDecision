@@ -285,6 +285,11 @@ public static class CandidatePolicy
             return null;
         }
 
+        if (indicator.DistanceToMa20Pct > 18m)
+        {
+            return null;
+        }
+
         var scoreBreakdown = BuildScoreBreakdown(profile, indicator, financial, industry, context);
         var totalScore = scoreBreakdown.TotalScore;
         if (totalScore < CandidatePoolMinimumScore)
@@ -392,10 +397,10 @@ public static class CandidatePolicy
         var rs20ExcessVsIndustry = indicator.Return20d - (resolvedContext.IndustryReturn20d ?? 0m);
         var rs60ExcessVsIndex = indicator.Return60d - resolvedContext.IndexReturn60d;
 
-        AddRule(details, "rs20ExcessVsIndex", "相对强弱", "20日超额收益强于指数", 8m, rs20ExcessVsIndex > 0m, $"当前 {rs20ExcessVsIndex:0.##}%");
-        AddRule(details, "rs20ExcessVsIndustry", "相对强弱", "20日超额收益强于行业", 7m, rs20ExcessVsIndustry > 0m, $"当前 {rs20ExcessVsIndustry:0.##}%");
-        AddRule(details, "rs60ExcessVsIndex", "相对强弱", "60日超额收益强于指数", 7m, rs60ExcessVsIndex > 0m, $"当前 {rs60ExcessVsIndex:0.##}%");
-        AddRule(details, "relativeStrengthPercentile", "相对强弱", "市场相对强度分位不低于80", 8m, indicator.RelativeStrengthScore >= 80m, $"当前 {indicator.RelativeStrengthScore:0.##}");
+        AddScoredRule(details, "rs20ExcessVsIndex", "相对强弱", "20日超额收益强于指数", 8m, ScorePositiveExcess(rs20ExcessVsIndex, 8m), $"当前 {rs20ExcessVsIndex:0.##}%");
+        AddScoredRule(details, "rs20ExcessVsIndustry", "相对强弱", "20日超额收益强于行业", 7m, ScorePositiveExcess(rs20ExcessVsIndustry, 7m), $"当前 {rs20ExcessVsIndustry:0.##}%");
+        AddScoredRule(details, "rs60ExcessVsIndex", "相对强弱", "60日超额收益强于指数", 7m, ScorePositiveExcess(rs60ExcessVsIndex, 7m), $"当前 {rs60ExcessVsIndex:0.##}%");
+        AddScoredRule(details, "relativeStrengthPercentile", "相对强弱", "市场相对强度分位", 8m, ScoreRelativeStrengthPercentile(indicator.RelativeStrengthScore, 8m), $"当前 {indicator.RelativeStrengthScore:0.##}");
 
         AddRule(details, "closeAboveMa20", "趋势质量", "收盘站上MA20", 4m, indicator.Close > indicator.Ma20, $"收盘 {indicator.Close:0.##} / MA20 {indicator.Ma20:0.##}");
         AddRule(details, "closeAboveMa60", "趋势质量", "收盘站上MA60", 5m, indicator.Close > indicator.Ma60, $"收盘 {indicator.Close:0.##} / MA60 {indicator.Ma60:0.##}");
@@ -426,8 +431,12 @@ public static class CandidatePolicy
         AddRule(details, "riskNearMa20", "风险纪律", "不明显追高", 2m, indicator.DistanceToMa20Pct <= 8m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
         AddRule(details, "riskTurnoverNotOverheated", "风险纪律", "换手不过热", 2m, turnoverRate <= 12m, $"当前 {turnoverRate:0.##}%");
         AddRule(details, "riskNormalDistance", "风险纪律", "仍在计划容忍区", 1m, indicator.DistanceToMa20Pct <= 12m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
-        AddPenaltyRule(details, "turnoverOverheated", "风险纪律", "换手过热", 1m, turnoverRate > 12m, $"当前 {turnoverRate:0.##}%");
-        AddPenaltyRule(details, "turnoverSpeculative", "风险纪律", "极端换手风险", 1m, turnoverRate > 20m, $"当前 {turnoverRate:0.##}%");
+        AddPenaltyRule(details, "distanceToMa20Overheated", "风险纪律", "距离MA20偏热", 2m, indicator.DistanceToMa20Pct > 12m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
+        AddPenaltyRule(details, "distanceToMa20Extreme", "风险纪律", "距离MA20过大", 3m, indicator.DistanceToMa20Pct > 18m, $"距离MA20 {indicator.DistanceToMa20Pct:0.##}%");
+        AddPenaltyRule(details, "return10dOverheated", "风险纪律", "10日涨幅偏热", 2m, resolvedContext.Return10d > 20m, $"当前 {resolvedContext.Return10d:0.##}%");
+        AddPenaltyRule(details, "return10dExtreme", "风险纪律", "10日涨幅过大", 3m, resolvedContext.Return10d > 30m, $"当前 {resolvedContext.Return10d:0.##}%");
+        AddPenaltyRule(details, "turnoverOverheated", "风险纪律", "换手过热", 2m, turnoverRate > 12m, $"当前 {turnoverRate:0.##}%");
+        AddPenaltyRule(details, "turnoverSpeculative", "风险纪律", "极端换手风险", 3m, turnoverRate > 20m, $"当前 {turnoverRate:0.##}%");
         AddPenaltyRule(details, "lhbRiskFlag", "风险纪律", "龙虎榜风险标签", 1m, !string.IsNullOrWhiteSpace(resolvedContext.Lhb?.RiskFlags), resolvedContext.Lhb?.RiskFlags ?? "无");
 
         var financialIsUsable = IsFinancialReportUsable(profile.SnapshotDate, financial);
@@ -444,7 +453,7 @@ public static class CandidatePolicy
         var trend = details.Where(static item => item.Dimension == "趋势质量").Sum(static item => item.Score);
         var volumePrice = Math.Max(0m, details.Where(static item => item.Dimension == "量价确认").Sum(static item => item.Score));
         var fundamental = details.Where(static item => item.Dimension == "基本面质量").Sum(static item => item.Score);
-        var riskDiscipline = Math.Max(0m, details.Where(static item => item.Dimension == "风险纪律").Sum(static item => item.Score));
+        var riskDiscipline = Math.Max(-10m, details.Where(static item => item.Dimension == "风险纪律").Sum(static item => item.Score));
 
         var financialMissingCount = 0;
         if (scoringFinancial?.Roe is null) financialMissingCount++;
@@ -559,6 +568,59 @@ public static class CandidatePolicy
         string evidence)
     {
         details.Add(new ScoreRuleDetail(key, dimension, label, hit ? maxScore : 0m, maxScore, hit, evidence));
+    }
+
+    private static void AddScoredRule(
+        ICollection<ScoreRuleDetail> details,
+        string key,
+        string dimension,
+        string label,
+        decimal maxScore,
+        decimal score,
+        string evidence)
+    {
+        var normalizedScore = Math.Min(maxScore, Math.Max(0m, score));
+        details.Add(new ScoreRuleDetail(key, dimension, label, normalizedScore, maxScore, normalizedScore > 0m, evidence));
+    }
+
+    private static decimal ScorePositiveExcess(decimal excessPct, decimal maxScore)
+    {
+        if (excessPct >= 10m)
+        {
+            return maxScore;
+        }
+
+        if (excessPct >= 6m)
+        {
+            return maxScore * 0.75m;
+        }
+
+        if (excessPct >= 3m)
+        {
+            return maxScore * 0.5m;
+        }
+
+        return excessPct > 0m ? maxScore * 0.25m : 0m;
+    }
+
+    private static decimal ScoreRelativeStrengthPercentile(decimal percentile, decimal maxScore)
+    {
+        if (percentile >= 90m)
+        {
+            return maxScore;
+        }
+
+        if (percentile >= 80m)
+        {
+            return maxScore * 0.75m;
+        }
+
+        if (percentile >= 70m)
+        {
+            return maxScore * 0.5m;
+        }
+
+        return percentile >= 60m ? maxScore * 0.25m : 0m;
     }
 
     private static bool IsFinancialReportUsable(DateOnly tradeDate, FinancialSnapshot? financial)

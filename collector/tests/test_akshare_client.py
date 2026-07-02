@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+from datetime import date
 from unittest.mock import Mock
 
 import pytest
@@ -192,6 +193,46 @@ class IndustryFallbackProvider:
         return [{"日期": "2026-06-16", "收盘价": 100}, {"日期": "2026-06-17", "收盘价": 110}]
 
 
+class IndustryThsStaleEastmoneyProvider:
+    def __init__(self) -> None:
+        self.em_history_calls = 0
+
+    def stock_board_industry_name_ths(self):
+        return [{"name": "半导体", "code": "881121"}]
+
+    def stock_board_industry_index_ths(self, symbol: str, start_date: str, end_date: str):
+        assert symbol == "半导体"
+        return [{"日期": "2026-06-16", "收盘价": 100}, {"日期": "2026-06-17", "收盘价": 110}]
+
+    def stock_board_industry_name_em(self):
+        return [{"板块名称": "半导体", "板块代码": "BK1036"}]
+
+    def stock_board_industry_hist_em(self, symbol: str, start_date: str, end_date: str, period: str, adjust: str):
+        self.em_history_calls += 1
+        assert symbol == "半导体"
+        assert period == "日k"
+        assert adjust == ""
+        return [{"日期": "2026-06-17", "收盘": 100}, {"日期": "2026-07-01", "收盘": 120}]
+
+
+class IndustryThsFreshProvider:
+    def stock_board_industry_name_ths(self):
+        return [{"name": "半导体", "code": "881121"}]
+
+    def stock_board_industry_index_ths(self, symbol: str, start_date: str, end_date: str):
+        assert symbol == "半导体"
+        return [{"日期": "2026-06-17", "收盘价": 100}, {"日期": "2026-07-01", "收盘价": 120}]
+
+    def stock_board_industry_name_em(self):
+        raise AssertionError("EastMoney should not be called when THS has current rows")
+
+
+class FixedDate(date):
+    @classmethod
+    def today(cls):  # type: ignore[override]
+        return cls(2026, 7, 1)
+
+
 class FinancialFallbackProvider:
     def stock_financial_abstract_ths(self, symbol: str, indicator: str):
         raise AttributeError("ths unavailable")
@@ -284,6 +325,30 @@ def test_fetch_industry_daily_stats_uses_ths_provider() -> None:
     assert rows[0]["industry_code"] == "881121"
     assert rows[0]["industry_name"] == "半导体"
     assert rows[0]["rank_20d"] == 1
+
+
+def test_fetch_industry_daily_stats_falls_back_to_eastmoney_when_ths_is_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(akshare_client_module, "date", FixedDate)
+    provider = IndustryThsStaleEastmoneyProvider()
+    client = AkshareClient(provider=provider)
+
+    rows = client.fetch_industry_daily_stats()
+
+    assert provider.em_history_calls == 1
+    assert rows[0]["industry_code"] == "BK1036"
+    assert rows[0]["industry_name"] == "半导体"
+    assert rows[0]["trade_date"] == "2026-07-01"
+    assert rows[0]["rank_20d"] == 1
+
+
+def test_fetch_industry_daily_stats_does_not_call_eastmoney_when_ths_is_current(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(akshare_client_module, "date", FixedDate)
+    client = AkshareClient(provider=IndustryThsFreshProvider())
+
+    rows = client.fetch_industry_daily_stats()
+
+    assert rows[0]["industry_code"] == "881121"
+    assert rows[0]["trade_date"] == "2026-07-01"
 
 
 def test_to_records_supports_dataframe_like_payload() -> None:

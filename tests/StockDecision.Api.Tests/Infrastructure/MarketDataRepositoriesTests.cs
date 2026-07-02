@@ -77,4 +77,40 @@ public sealed class MarketDataRepositoriesTests
         Assert.Equal("银行", industry.Key);
         Assert.NotNull(industry.Value);
     }
+
+    [Fact]
+    public async Task GetIndustryStatsAsync_DeduplicatesDuplicateIndustryRows()
+    {
+        var options = new DbContextOptionsBuilder<StockDecisionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var dbContext = new StockDecisionDbContext(options);
+        dbContext.MarketIndustryDailyStats.AddRange(
+            new MarketIndustryDailyStatEntity
+            {
+                IndustryCode = "881124",
+                IndustryName = "半导体",
+                TradeDate = new DateOnly(2026, 7, 1),
+                PctChange20d = 5.1m,
+                Rank20d = 8
+            },
+            new MarketIndustryDailyStatEntity
+            {
+                IndustryCode = "BK1037",
+                IndustryName = "半导体",
+                TradeDate = new DateOnly(2026, 7, 1),
+                PctChange20d = 6.2m,
+                Rank20d = 3
+            });
+        await dbContext.SaveChangesAsync();
+
+        var repository = new EfMarketDataRepository(dbContext);
+
+        var result = await repository.GetIndustryStatsAsync(new DateOnly(2026, 7, 1), CancellationToken.None);
+
+        var industry = Assert.Single(result);
+        Assert.Equal("半导体", industry.IndustryName);
+        Assert.Equal("BK1037", industry.IndustryCode);
+    }
 }

@@ -167,6 +167,35 @@ public class MarketControllersTests
     }
 
     /// <summary>
+    /// 验证资金流接口会返回个股和行业资金榜。
+    /// </summary>
+    [Fact]
+    public async Task FundFlowsController_Should_Return_Stock_And_Industry_Fund_Flows()
+    {
+        var fixture = CreateFixture();
+        var controller = new FundFlowsController(
+            new GetStockFundFlowsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository),
+            new GetIndustryFundFlowsUseCase(fixture.EnsureLatestSnapshot, fixture.MarketRepository));
+
+        var stockResult = await controller.GetStocks(new FundFlowListQuery { Date = TradeDate }, CancellationToken.None);
+        var industryResult = await controller.GetIndustries(new FundFlowListQuery { Date = TradeDate }, CancellationToken.None);
+
+        var stockOk = Assert.IsType<OkObjectResult>(stockResult);
+        var stockResponse = Assert.IsType<PagedResponse<StockFundFlowListItemResponse>>(stockOk.Value);
+        var stock = Assert.Single(stockResponse.Items);
+        Assert.Equal("600001", stock.StockCode);
+        Assert.Equal(125_000_000m, stock.MainNetAmount);
+        Assert.True(stock.IsCandidate);
+
+        var industryOk = Assert.IsType<OkObjectResult>(industryResult);
+        var industryResponse = Assert.IsType<PagedResponse<IndustryFundFlowListItemResponse>>(industryOk.Value);
+        var industry = Assert.Single(industryResponse.Items);
+        Assert.Equal("Software", industry.IndustryName);
+        Assert.Equal(1_280_000_000m, industry.MainNetAmount);
+        Assert.Equal(1, industry.CandidateCount);
+    }
+
+    /// <summary>
     /// 验证财务接口会返回最新财务快照列表。
     /// </summary>
     [Fact]
@@ -664,6 +693,39 @@ public class MarketControllersTests
         public Task UpsertSignalsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, IReadOnlyList<TradeSignal> signals, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<int> CountScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken) => Task.FromResult(0);
         public Task<PagedResponse<FinancialListItemResponse>> GetFinancialScorePageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FinancialListQuery query, CancellationToken cancellationToken) => Task.FromResult(new PagedResponse<FinancialListItemResponse>([], 1, query.PageSize, 0));
+        public Task<PagedResponse<StockFundFlowListItemResponse>> GetStockFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+        {
+            var item = new StockFundFlowListItemResponse(
+                profile.StockCode,
+                profile.StockName,
+                profile.IndustryName,
+                tradeDate,
+                stockFundFlow.MainNetAmount,
+                stockFundFlow.MainNetPct,
+                stockFundFlow.SuperLargeNetAmount,
+                stockFundFlow.SuperLargeNetPct,
+                stockFundFlow.RankPercentile5d,
+                candidate.TotalScore,
+                candidate.EligibilityStatus,
+                true,
+                candidate.IsTradable);
+            return Task.FromResult(new PagedResponse<StockFundFlowListItemResponse>(tradeDate == importedTradeDate ? [item] : [], 1, query.PageSize, tradeDate == importedTradeDate ? 1 : 0));
+        }
+        public Task<PagedResponse<IndustryFundFlowListItemResponse>> GetIndustryFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken)
+        {
+            var item = new IndustryFundFlowListItemResponse(
+                industry.IndustryName,
+                tradeDate,
+                industryFundFlow.MainNetAmount,
+                industryFundFlow.MainNetPct,
+                industryFundFlow.Rank,
+                industryFundFlow.RankPercentile,
+                1,
+                1,
+                candidate.TotalScore,
+                signal.TotalScore);
+            return Task.FromResult(new PagedResponse<IndustryFundFlowListItemResponse>(tradeDate == importedTradeDate ? [item] : [], 1, query.PageSize, tradeDate == importedTradeDate ? 1 : 0));
+        }
         public Task<IReadOnlyList<IndicatorSnapshot>> GetIndicatorSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<IndicatorSnapshot>>(indicator is null ? [] : [indicator]);
         public Task<MarketRegimeSnapshot?> GetMarketRegimeAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken) => Task.FromResult<MarketRegimeSnapshot?>(regime);

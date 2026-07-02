@@ -251,6 +251,11 @@ public sealed class EnsureLatestMarketSnapshotUseCase(
                 continue;
             }
 
+            if (!profile.IsActive || profile.IsSt || profile.IsDelistingRisk)
+            {
+                continue;
+            }
+
             financials.TryGetValue(indicator.StockCode, out var financial);
             var scoringIndustryName = profile.EffectiveScoringIndustryName ?? string.Empty;
             industries.TryGetValue(scoringIndustryName, out var industry);
@@ -558,7 +563,6 @@ public sealed class GetIndustriesUseCase(
                 },
                 StringComparer.OrdinalIgnoreCase);
 
-        var industryStatsByName = industryStats.ToDictionary(static item => item.IndustryName, StringComparer.OrdinalIgnoreCase);
         var items = industryStats
             .Select(industry =>
             {
@@ -596,6 +600,52 @@ public sealed class GetIndustriesUseCase(
         };
 
         return MarketListQueryPaging.ToPagedResponse(items, query.Page, query.PageSize);
+    }
+}
+
+/// <summary>
+/// 读取个股资金流列表。
+/// </summary>
+public sealed class GetStockFundFlowsUseCase(
+    EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
+    IMarketDataRepository marketRepository)
+{
+    /// <summary>
+    /// 返回指定交易日或最新交易日的个股资金流分页列表。
+    /// </summary>
+    public async Task<PagedResponse<StockFundFlowListItemResponse>> ExecuteAsync(FundFlowListQuery query, CancellationToken cancellationToken = default)
+    {
+        var snapshotVersion = StrategySnapshotVersionResolver.Resolve(query.SnapshotVersion);
+        var resolvedDate = query.Date ?? await ensureLatestSnapshot.ExecuteAsync(snapshotVersion, cancellationToken);
+        if (resolvedDate is null)
+        {
+            return new PagedResponse<StockFundFlowListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
+        }
+
+        return await marketRepository.GetStockFundFlowPageAsync(resolvedDate.Value, snapshotVersion, query, cancellationToken);
+    }
+}
+
+/// <summary>
+/// 读取行业资金流列表。
+/// </summary>
+public sealed class GetIndustryFundFlowsUseCase(
+    EnsureLatestMarketSnapshotUseCase ensureLatestSnapshot,
+    IMarketDataRepository marketRepository)
+{
+    /// <summary>
+    /// 返回指定交易日或最新交易日的行业资金流分页列表。
+    /// </summary>
+    public async Task<PagedResponse<IndustryFundFlowListItemResponse>> ExecuteAsync(FundFlowListQuery query, CancellationToken cancellationToken = default)
+    {
+        var snapshotVersion = StrategySnapshotVersionResolver.Resolve(query.SnapshotVersion);
+        var resolvedDate = query.Date ?? await ensureLatestSnapshot.ExecuteAsync(snapshotVersion, cancellationToken);
+        if (resolvedDate is null)
+        {
+            return new PagedResponse<IndustryFundFlowListItemResponse>([], 1, MarketListQueryPaging.NormalizePageSize(query.PageSize), 0);
+        }
+
+        return await marketRepository.GetIndustryFundFlowPageAsync(resolvedDate.Value, snapshotVersion, query, cancellationToken);
     }
 }
 
@@ -1161,7 +1211,11 @@ public sealed class GetTaskCenterOverviewUseCase(
             messages.Add("上游仍返回昨日交易日，今日日频数据尚未发布。");
         }
 
-        if (recentCollectorRuns.Any(item => item.TargetScope == "sync-daily-industries" && !item.IsComplete))
+        var latestIndustryRun = recentCollectorRuns
+            .Where(static item => item.TargetScope == "sync-daily-industries" || item.TargetScope == "bootstrap-industries")
+            .OrderByDescending(static item => item.CreatedAtUtc)
+            .FirstOrDefault();
+        if (latestIndustryRun is not null && !latestIndustryRun.IsComplete)
         {
             messages.Add("行业数据不完整，正式评分会继续沿用最近完整交易日。");
         }

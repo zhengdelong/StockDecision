@@ -266,6 +266,45 @@ export interface IndustryQuery {
   pageSize?: number
 }
 
+export interface FundFlowQuery {
+  date?: string
+  snapshotVersion?: SnapshotVersion
+  search?: string
+  sortBy?: 'percentile' | 'main' | 'mainPct' | 'superLargePct' | 'score' | 'rank' | 'candidates' | 'signals'
+  direction?: 'all' | 'inflow' | 'outflow'
+  page?: number
+  pageSize?: number
+}
+
+export interface StockFundFlowItem {
+  stockCode: string
+  stockName: string
+  industryName: string | null
+  tradeDate: string
+  mainNetAmount: number | null
+  mainNetPct: number | null
+  superLargeNetAmount: number | null
+  superLargeNetPct: number | null
+  rankPercentile5d: number | null
+  totalScore: number | null
+  eligibilityStatus: string | null
+  isCandidate: boolean
+  isTradable: boolean
+}
+
+export interface IndustryFundFlowItem {
+  industryName: string
+  tradeDate: string
+  mainNetAmount: number | null
+  mainNetPct: number | null
+  rank: number | null
+  rankPercentile: number | null
+  candidateCount: number
+  signalCount: number
+  topCandidateScore: number | null
+  topSignalScore: number | null
+}
+
 export interface FinancialQuery {
   date?: string
   snapshotVersion?: SnapshotVersion

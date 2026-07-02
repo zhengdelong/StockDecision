@@ -192,6 +192,27 @@ public sealed record IndustryListQuery
 }
 
 /// <summary>
+/// 资金流列表查询条件。
+/// </summary>
+public sealed record FundFlowListQuery
+{
+    /// <summary>交易日，为空时取最新。</summary>
+    public DateOnly? Date { get; init; }
+    /// <summary>快照版本，为空时默认正式版。</summary>
+    public string? SnapshotVersion { get; init; }
+    /// <summary>搜索关键字，匹配代码、名称和行业。</summary>
+    public string? Search { get; init; }
+    /// <summary>排序字段，个股支持 percentile、main、mainPct、superLargePct、score；行业支持 rank、percentile、main、candidates、signals。</summary>
+    public string? SortBy { get; init; }
+    /// <summary>资金方向，支持 all、inflow、outflow。</summary>
+    public string? Direction { get; init; }
+    /// <summary>页码，从 1 开始。</summary>
+    public int Page { get; init; } = 1;
+    /// <summary>每页条数。</summary>
+    public int PageSize { get; init; } = 10;
+}
+
+/// <summary>
 /// 财务列表查询条件。
 /// </summary>
 public sealed record FinancialListQuery
@@ -449,6 +470,39 @@ public sealed record IndustryListItemResponse(
     DateOnly TradeDate,
     decimal PctChange20d,
     int Rank20d,
+    int CandidateCount,
+    int SignalCount,
+    decimal? TopCandidateScore,
+    decimal? TopSignalScore);
+
+/// <summary>
+/// 个股资金流列表项响应。
+/// </summary>
+public sealed record StockFundFlowListItemResponse(
+    string StockCode,
+    string StockName,
+    string? IndustryName,
+    DateOnly TradeDate,
+    decimal? MainNetAmount,
+    decimal? MainNetPct,
+    decimal? SuperLargeNetAmount,
+    decimal? SuperLargeNetPct,
+    decimal? RankPercentile5d,
+    decimal? TotalScore,
+    string? EligibilityStatus,
+    bool IsCandidate,
+    bool IsTradable);
+
+/// <summary>
+/// 行业资金流列表项响应。
+/// </summary>
+public sealed record IndustryFundFlowListItemResponse(
+    string IndustryName,
+    DateOnly TradeDate,
+    decimal? MainNetAmount,
+    decimal? MainNetPct,
+    int? Rank,
+    decimal? RankPercentile,
     int CandidateCount,
     int SignalCount,
     decimal? TopCandidateScore,
@@ -915,6 +969,10 @@ public interface IMarketDataRepository
     Task<int> CountScoreSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken);
     /// <summary>按数据库排序分页读取财务列表。</summary>
     Task<PagedResponse<FinancialListItemResponse>> GetFinancialScorePageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FinancialListQuery query, CancellationToken cancellationToken);
+    /// <summary>按数据库排序分页读取个股资金流列表。</summary>
+    Task<PagedResponse<StockFundFlowListItemResponse>> GetStockFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken);
+    /// <summary>按数据库排序分页读取行业资金流列表。</summary>
+    Task<PagedResponse<IndustryFundFlowListItemResponse>> GetIndustryFundFlowPageAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, FundFlowListQuery query, CancellationToken cancellationToken);
     /// <summary>读取指定交易日指标快照。</summary>
     Task<IReadOnlyList<IndicatorSnapshot>> GetIndicatorSnapshotsAsync(DateOnly tradeDate, StrategySnapshotVersion snapshotVersion, CancellationToken cancellationToken);
     /// <summary>读取指定交易日市场环境。</summary>

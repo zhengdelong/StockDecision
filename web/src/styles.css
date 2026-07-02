@@ -599,6 +599,33 @@ h2 {
   font-size: 13px;
 }
 
+.compact-field select {
+  min-width: 150px;
+}
+
+.fund-flow-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.fund-flow-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.section-heading h3 {
+  margin: 2px 0 0;
+  color: #0f172a;
+  font-size: 18px;
+}
+
 .task-actions {
   display: flex;
   flex-wrap: wrap;

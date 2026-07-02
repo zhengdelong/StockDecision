@@ -7,11 +7,13 @@ import {
   fetchCandidates,
   fetchDashboard,
   fetchFinancials,
+  fetchIndustryFundFlows,
   fetchIndustries,
   fetchLearningReviews,
   fetchPositionHistory,
   fetchPositions,
   fetchSignals,
+  fetchStockFundFlows,
   fetchStockDetail,
   fetchStrategyExplanation,
   fetchSystemAbout,
@@ -32,6 +34,7 @@ import type {
   DashboardResponse,
   FinancialItem,
   FinancialQuery,
+  IndustryFundFlowItem,
   IndustryItem,
   IndustryQuery,
   LearningReviewOverviewResponse,
@@ -41,6 +44,7 @@ import type {
   SimulatedPositionItem,
   SimulatedTradeHistoryItem,
   SnapshotVersion,
+  StockFundFlowItem,
   StockDetailResponse,
   StrategyExplanationResponse,
   SystemHealthResponse,
@@ -52,6 +56,9 @@ export type CandidateSortMode = 'score' | 'rr' | 'close'
 export type SignalSortMode = 'score' | 'rr' | 'capital'
 export type IndustrySortMode = 'strength' | 'rank' | 'candidates' | 'signals'
 export type FinancialSortMode = 'score' | 'roe' | 'revenue' | 'profit' | 'marketCap'
+export type StockFundFlowSortMode = 'percentile' | 'main' | 'mainPct' | 'superLargePct' | 'score'
+export type IndustryFundFlowSortMode = 'rank' | 'percentile' | 'main' | 'candidates' | 'signals'
+export type FundFlowDirection = 'all' | 'inflow' | 'outflow'
 
 const pageSize = 10
 
@@ -60,6 +67,8 @@ export function useSignalDesk() {
   const candidatePage = ref<PagedResponse<CandidateItem> | null>(null)
   const signalPage = ref<PagedResponse<SignalItem> | null>(null)
   const industryPage = ref<PagedResponse<IndustryItem> | null>(null)
+  const stockFundFlowPage = ref<PagedResponse<StockFundFlowItem> | null>(null)
+  const industryFundFlowPage = ref<PagedResponse<IndustryFundFlowItem> | null>(null)
   const financialPage = ref<PagedResponse<FinancialItem> | null>(null)
   const stockDetail = ref<StockDetailResponse | null>(null)
   const taskCenterOverview = ref<TaskCenterOverviewResponse | null>(null)
@@ -91,22 +100,33 @@ export function useSignalDesk() {
   const signalSortMode = ref<SignalSortMode>('score')
   const industrySortMode = ref<IndustrySortMode>('strength')
   const financialSortMode = ref<FinancialSortMode>('score')
+  const stockFundFlowSortMode = ref<StockFundFlowSortMode>('percentile')
+  const industryFundFlowSortMode = ref<IndustryFundFlowSortMode>('rank')
+  const fundFlowDirection = ref<FundFlowDirection>('all')
   const candidatePageIndex = ref(1)
   const signalPageIndex = ref(1)
   const industryPageIndex = ref(1)
+  const stockFundFlowPageIndex = ref(1)
+  const industryFundFlowPageIndex = ref(1)
   const financialPageIndex = ref(1)
 
   const candidates = computed(() => candidatePage.value?.items ?? [])
   const signals = computed(() => signalPage.value?.items ?? [])
   const industries = computed(() => industryPage.value?.items ?? [])
+  const stockFundFlows = computed(() => stockFundFlowPage.value?.items ?? [])
+  const industryFundFlows = computed(() => industryFundFlowPage.value?.items ?? [])
   const financials = computed(() => financialPage.value?.items ?? [])
   const candidateTotalCount = computed(() => candidatePage.value?.totalCount ?? 0)
   const signalTotalCount = computed(() => signalPage.value?.totalCount ?? 0)
   const industryTotalCount = computed(() => industryPage.value?.totalCount ?? 0)
+  const stockFundFlowTotalCount = computed(() => stockFundFlowPage.value?.totalCount ?? 0)
+  const industryFundFlowTotalCount = computed(() => industryFundFlowPage.value?.totalCount ?? 0)
   const financialTotalCount = computed(() => financialPage.value?.totalCount ?? 0)
   const totalCandidatePages = computed(() => Math.max(1, Math.ceil(candidateTotalCount.value / pageSize)))
   const totalSignalPages = computed(() => Math.max(1, Math.ceil(signalTotalCount.value / pageSize)))
   const totalIndustryPages = computed(() => Math.max(1, Math.ceil(industryTotalCount.value / pageSize)))
+  const totalStockFundFlowPages = computed(() => Math.max(1, Math.ceil(stockFundFlowTotalCount.value / pageSize)))
+  const totalIndustryFundFlowPages = computed(() => Math.max(1, Math.ceil(industryFundFlowTotalCount.value / pageSize)))
   const totalFinancialPages = computed(() => Math.max(1, Math.ceil(financialTotalCount.value / pageSize)))
   const topCandidates = computed(() => candidates.value.slice(0, 3))
 
@@ -153,6 +173,30 @@ export function useSignalDesk() {
       sortBy: financialSortMode.value,
       minRoe: minRoe.value > 0 ? minRoe.value : undefined,
       positiveGrowthOnly: positiveGrowthOnly.value || undefined,
+      page,
+      pageSize,
+    }
+  }
+
+  function buildStockFundFlowQuery(page: number) {
+    return {
+      date: selectedTradeDate.value || undefined,
+      snapshotVersion: selectedSnapshotVersion.value,
+      search: searchText.value || undefined,
+      sortBy: stockFundFlowSortMode.value,
+      direction: fundFlowDirection.value,
+      page,
+      pageSize,
+    }
+  }
+
+  function buildIndustryFundFlowQuery(page: number) {
+    return {
+      date: selectedTradeDate.value || undefined,
+      snapshotVersion: selectedSnapshotVersion.value,
+      search: searchText.value || undefined,
+      sortBy: industryFundFlowSortMode.value,
+      direction: fundFlowDirection.value,
       page,
       pageSize,
     }
@@ -219,12 +263,16 @@ export function useSignalDesk() {
       candidatePageIndex.value = 1
       signalPageIndex.value = 1
       industryPageIndex.value = 1
+      stockFundFlowPageIndex.value = 1
+      industryFundFlowPageIndex.value = 1
       financialPageIndex.value = 1
 
       await Promise.all([
         loadCandidatePage(1),
         loadSignalPage(1),
         loadIndustryPage(1),
+        loadStockFundFlowPage(1),
+        loadIndustryFundFlowPage(1),
         loadFinancialPage(1),
         loadPositions(),
         loadBacktests(),
@@ -278,6 +326,16 @@ export function useSignalDesk() {
     financialPageIndex.value = financialPage.value.page
   }
 
+  async function loadStockFundFlowPage(page: number) {
+    stockFundFlowPage.value = await fetchStockFundFlows(buildStockFundFlowQuery(page))
+    stockFundFlowPageIndex.value = stockFundFlowPage.value.page
+  }
+
+  async function loadIndustryFundFlowPage(page: number) {
+    industryFundFlowPage.value = await fetchIndustryFundFlows(buildIndustryFundFlowQuery(page))
+    industryFundFlowPageIndex.value = industryFundFlowPage.value.page
+  }
+
   async function selectStock(stockCode: string, showPanelLoading = true) {
     if (!selectedTradeDate.value) {
       return
@@ -309,15 +367,16 @@ export function useSignalDesk() {
     isLoading.value = true
     errorMessage.value = ''
     try {
-      await Promise.all([loadCandidatePage(1), loadSignalPage(1), loadIndustryPage(1), loadFinancialPage(1)])
+      await Promise.all([loadCandidatePage(1), loadSignalPage(1), loadIndustryPage(1), loadStockFundFlowPage(1), loadIndustryFundFlowPage(1), loadFinancialPage(1)])
       const selectedCode = stockDetail.value?.stockCode
       const preferredCode =
         selectedCode && (
           candidates.value.some((item) => item.stockCode === selectedCode) ||
           signals.value.some((item) => item.stockCode === selectedCode) ||
+          stockFundFlows.value.some((item) => item.stockCode === selectedCode) ||
           financials.value.some((item) => item.stockCode === selectedCode))
           ? selectedCode
-          : signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode ?? financials.value[0]?.stockCode
+          : signals.value[0]?.stockCode ?? candidates.value[0]?.stockCode ?? stockFundFlows.value[0]?.stockCode ?? financials.value[0]?.stockCode
 
       if (preferredCode) {
         await selectStock(preferredCode, false)
@@ -468,6 +527,20 @@ export function useSignalDesk() {
     }
   }
 
+  function moveStockFundFlowPage(step: number) {
+    const nextPage = Math.min(totalStockFundFlowPages.value, Math.max(1, stockFundFlowPageIndex.value + step))
+    if (nextPage !== stockFundFlowPageIndex.value) {
+      void loadStockFundFlowPage(nextPage)
+    }
+  }
+
+  function moveIndustryFundFlowPage(step: number) {
+    const nextPage = Math.min(totalIndustryFundFlowPages.value, Math.max(1, industryFundFlowPageIndex.value + step))
+    if (nextPage !== industryFundFlowPageIndex.value) {
+      void loadIndustryFundFlowPage(nextPage)
+    }
+  }
+
   onMounted(() => {
     void loadHomeData()
   })
@@ -491,7 +564,12 @@ export function useSignalDesk() {
     financialSortMode,
     financialTotalCount,
     financials,
+    fundFlowDirection,
     industries,
+    industryFundFlows,
+    industryFundFlowPageIndex,
+    industryFundFlowSortMode,
+    industryFundFlowTotalCount,
     industryPageIndex,
     industrySortMode,
     industryTotalCount,
@@ -507,8 +585,10 @@ export function useSignalDesk() {
     minScore,
     moveCandidatePage,
     moveFinancialPage,
+    moveIndustryFundFlowPage,
     moveIndustryPage,
     moveSignalPage,
+    moveStockFundFlowPage,
     onlyTradable,
     positionHistory,
     positions,
@@ -524,6 +604,10 @@ export function useSignalDesk() {
     signalSortMode,
     signalTotalCount,
     signals,
+    stockFundFlows,
+    stockFundFlowPageIndex,
+    stockFundFlowSortMode,
+    stockFundFlowTotalCount,
     stockDetail,
     strategyExplanation,
     systemAbout,
@@ -533,7 +617,9 @@ export function useSignalDesk() {
     triggerSnapshot,
     totalCandidatePages,
     totalFinancialPages,
+    totalIndustryFundFlowPages,
     totalIndustryPages,
     totalSignalPages,
+    totalStockFundFlowPages,
   }
 }

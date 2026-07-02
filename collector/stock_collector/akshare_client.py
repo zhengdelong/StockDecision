@@ -264,12 +264,36 @@ class AkshareClient:
 
     def fetch_industry_daily_stats(self) -> list[dict[str, Any]]:
         provider = self._get_provider()
-        boards = self._to_records(provider.stock_board_industry_name_ths())
-        if not boards:
-            raise AkshareClientError("THS industry board list returned no rows.")
-
         end_date = date.today()
         start_date = end_date - timedelta(days=60)
+
+        try:
+            ths_stats = self._fetch_ths_industry_daily_stats(provider, start_date=start_date, end_date=end_date)
+        except Exception:  # noqa: BLE001
+            ths_stats = []
+        if ths_stats and self._stats_include_trade_date(ths_stats, end_date):
+            return self._rank_industry_stats(ths_stats)
+
+        try:
+            em_stats = self._fetch_eastmoney_industry_daily_stats(provider, start_date=start_date, end_date=end_date)
+        except Exception:  # noqa: BLE001
+            em_stats = []
+        if em_stats:
+            return self._rank_industry_stats(em_stats)
+
+        if ths_stats:
+            return self._rank_industry_stats(ths_stats)
+
+        raise AkshareClientError("No supported industry daily stats interface returned rows.")
+
+    def _fetch_ths_industry_daily_stats(self, provider: Any, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        if not hasattr(provider, "stock_board_industry_name_ths") or not hasattr(provider, "stock_board_industry_index_ths"):
+            return []
+
+        boards = self._to_records(provider.stock_board_industry_name_ths())
+        if not boards:
+            return []
+
         stats: list[dict[str, Any]] = []
         for board in boards:
             board_name = str(board.get("name") or "").strip()
@@ -287,6 +311,37 @@ class AkshareClient:
             if stat is not None:
                 stats.append(stat)
 
+        return stats
+
+    def _fetch_eastmoney_industry_daily_stats(self, provider: Any, *, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        if not hasattr(provider, "stock_board_industry_name_em") or not hasattr(provider, "stock_board_industry_hist_em"):
+            return []
+
+        boards = self._to_records(provider.stock_board_industry_name_em())
+        stats: list[dict[str, Any]] = []
+        for board in boards:
+            board_name = str(board.get("板块名称") or board.get("name") or "").strip()
+            board_code = str(board.get("板块代码") or board.get("code") or "").strip()
+            if not board_name or not board_code:
+                continue
+
+            history_rows = self._to_records(
+                provider.stock_board_industry_hist_em(
+                    symbol=board_name,
+                    start_date=start_date.strftime("%Y%m%d"),
+                    end_date=end_date.strftime("%Y%m%d"),
+                    period="日k",
+                    adjust="",
+                )
+            )
+            stat = self._build_industry_stat_row(board_code=board_code, board_name=board_name, history_rows=history_rows)
+            if stat is not None:
+                stats.append(stat)
+
+        return stats
+
+    @staticmethod
+    def _rank_industry_stats(stats: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ranked = sorted(
             stats,
             key=lambda item: item.get("pct_change_20d") if item.get("pct_change_20d") is not None else float("-inf"),
@@ -295,6 +350,10 @@ class AkshareClient:
         for index, item in enumerate(ranked, start=1):
             item["rank_20d"] = index
         return ranked
+
+    @classmethod
+    def _stats_include_trade_date(cls, stats: list[dict[str, Any]], trade_date: date) -> bool:
+        return any(cls._parse_trade_date(item.get("trade_date")) == trade_date for item in stats)
 
     def fetch_stock_fund_flow(self, stock_code: str, market: str | None = None) -> list[dict[str, Any]]:
         provider = self._get_provider()
@@ -691,6 +750,21 @@ class AkshareClient:
             "pct_change_20d": pct_change_20d,
             "member_count": None,
         }
+
+    @staticmethod
+    def _parse_trade_date(value: Any) -> date | None:
+        if isinstance(value, date):
+            return value
+        if value in (None, "", "-", "--"):
+            return None
+
+        text = str(value).strip().replace("/", "-")
+        try:
+            if len(text) == 8 and text.isdigit():
+                return date(int(text[:4]), int(text[4:6]), int(text[6:8]))
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
 
     def _build_stock_metadata_map(self, provider: Any) -> dict[str, dict[str, Any]]:
         """
